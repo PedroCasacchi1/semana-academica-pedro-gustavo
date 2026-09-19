@@ -1,9 +1,12 @@
 {
-  "stack": "PREENCHER — linguagem e framework da API; tipo e framework da interface",
+  "stack": "Node.js + Express + SQLite; interface web React + Vite; testes com Vitest",
   "api": {
     "pasta": "api",
-    "instalar": "PREENCHER — por exemplo: npm install",
-    "iniciar": "PREENCHER — por exemplo: npm start"
+    "instalar": "npm install",
+    "iniciar": "npm start"
   },
-  "testes": []
+  "testes": [
+    "cd api && npm test",
+    "cd app && npm test"
+  ]
 }
