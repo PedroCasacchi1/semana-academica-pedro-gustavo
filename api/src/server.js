@@ -111,6 +111,61 @@ function diaEmBrasilia(iso) {
   return `${valor.year}-${valor.month}-${valor.day}`;
 }
 
+function minutosEntre(inicio, fim) {
+  return (Date.parse(fim) - Date.parse(inicio)) / 60000;
+}
+
+function encontrosValidos(encontros) {
+  const ordenados = [...encontros].sort((a, b) => Date.parse(a.inicio) - Date.parse(b.inicio));
+
+  for (let indice = 0; indice < ordenados.length; indice += 1) {
+    const encontro = ordenados[indice];
+    const inicio = Date.parse(encontro.inicio);
+    const fim = Date.parse(encontro.fim);
+    const duracao = minutosEntre(encontro.inicio, encontro.fim);
+    const diaInicio = diaEmBrasilia(encontro.inicio);
+    const diaFim = diaEmBrasilia(encontro.fim);
+
+    if (
+      Number.isNaN(inicio) ||
+      Number.isNaN(fim) ||
+      duracao < 60 ||
+      duracao > 240 ||
+      diaInicio !== diaFim ||
+      diaInicio < '2026-10-19' ||
+      diaInicio > '2026-10-23'
+    ) {
+      return false;
+    }
+
+    if (indice > 0 && Date.parse(ordenados[indice - 1].fim) > inicio) return false;
+  }
+
+  return true;
+}
+
+function existeConflitoDeSala(db, salaId, encontros) {
+  const encontrosExistentes = db
+    .prepare(
+      `SELECT e.inicio, e.fim
+       FROM encontros e
+       JOIN atividades a ON a.id = e.atividadeId
+       WHERE a.salaId = ? AND a.cancelada = 0`,
+    )
+    .all(salaId);
+
+  return encontros.some((novo) => {
+    const novoInicio = Date.parse(novo.inicio);
+    const novoFim = Date.parse(novo.fim);
+
+    return encontrosExistentes.some((existente) => {
+      const existenteInicio = Date.parse(existente.inicio);
+      const existenteFim = Date.parse(existente.fim);
+      return novoInicio < existenteFim + 15 * 60000 && existenteInicio < novoFim + 15 * 60000;
+    });
+  });
+}
+
 function exigirOrganizacao(req, res, next) {
   if (req.usuario.papel !== 'organizacao') return erro(res, 403, 'SOMENTE_ORGANIZACAO');
   next();
@@ -136,6 +191,11 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
   carregarDadosIniciais(db);
 
   app.use(express.json());
+
+  app.use((error, _req, res, next) => {
+    if (error instanceof SyntaxError) return erro(res, 422, 'DADOS_INVALIDOS');
+    next(error);
+  });
 
   if (modoTeste) {
     app.post('/_teste/reset', (_req, res) => {
@@ -165,6 +225,25 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
 
   app.post('/atividades', exigirOrganizacao, (req, res) => {
     if (!corpoAtividadeValido(req.body)) return erro(res, 422, 'DADOS_INVALIDOS');
+    if (req.body.tipo === 'palestra' && req.body.encontros.length !== 1) {
+      return erro(res, 422, 'QUANTIDADE_DE_ENCONTROS');
+    }
+    if (req.body.tipo === 'minicurso' && (req.body.encontros.length < 2 || req.body.encontros.length > 5)) {
+      return erro(res, 422, 'QUANTIDADE_DE_ENCONTROS');
+    }
+    if (!['palestra', 'minicurso'].includes(req.body.tipo) || req.body.vagas < 1) {
+      return erro(res, 422, 'DADOS_INVALIDOS');
+    }
+
+    const sala = db.prepare('SELECT id, capacidade FROM salas WHERE id = ?').get(req.body.salaId);
+    if (!sala) return erro(res, 404, 'NAO_ENCONTRADO');
+    if (req.body.vagas > sala.capacidade) return erro(res, 422, 'VAGAS_ACIMA_DA_CAPACIDADE');
+
+    if (!encontrosValidos(req.body.encontros)) return erro(res, 422, 'ENCONTRO_INVALIDO');
+
+    if (existeConflitoDeSala(db, req.body.salaId, req.body.encontros)) {
+      return erro(res, 409, 'CONFLITO_DE_SALA');
+    }
 
     const id = gerarId('atv');
     const encontrosOrdenados = [...req.body.encontros].sort(
