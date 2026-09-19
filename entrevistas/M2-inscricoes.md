@@ -1,6 +1,6 @@
 # Entrevista M2 - Inscricoes e lista de espera
 
-Status: Rodada 1 em andamento.
+Status: Rodadas 1 e 2 encerradas e confirmadas. Todas as perguntas respondidas.
 
 ## Escopo da sessao
 

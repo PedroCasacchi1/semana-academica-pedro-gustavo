@@ -61,7 +61,9 @@ function criarBanco() {
       id TEXT PRIMARY KEY,
       atividadeId TEXT NOT NULL,
       participanteId TEXT,
-      status TEXT NOT NULL
+      status TEXT NOT NULL,
+      criadaEm TEXT NOT NULL,
+      convocadaAte TEXT
     );
 
     CREATE TABLE presencas (
@@ -301,16 +303,16 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
       res.json({ agora: agoraControlado });
     });
 
-    app.post('/_teste/inscricoes', (req, res) => {
+     app.post('/_teste/inscricoes', (req, res) => {
       if (!inscricoesTesteValidas(req.body)) return erro(res, 422, 'DADOS_INVALIDOS');
       const atividade = db.prepare('SELECT id FROM atividades WHERE id = ?').get(req.body.atividadeId);
       if (!atividade) return erro(res, 404, 'NAO_ENCONTRADO');
 
       const inserir = db.prepare(
-        'INSERT INTO inscricoes (id, atividadeId, participanteId, status) VALUES (?, ?, ?, ?)',
+         'INSERT INTO inscricoes (id, atividadeId, participanteId, status, criadaEm, convocadaAte) VALUES (?, ?, ?, ?, ?, ?)',
       );
       for (const inscricao of req.body.inscricoes) {
-        inserir.run(gerarId('ins'), req.body.atividadeId, inscricao.participanteId ?? null, inscricao.status);
+        inserir.run(gerarId('ins'), req.body.atividadeId, inscricao.participanteId ?? null, inscricao.status, agora(), null);
       }
       res.status(204).end();
     });
@@ -328,6 +330,144 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
 
     req.usuario = usuario;
     next();
+  });
+
+  function atividadeComEncontros(atividadeId) {
+    const atividade = db.prepare('SELECT * FROM atividades WHERE id = ?').get(atividadeId);
+    if (!atividade) return null;
+    return { ...atividade, encontros: db.prepare('SELECT id, inicio, fim FROM encontros WHERE atividadeId = ? ORDER BY datetime(inicio)').all(atividadeId) };
+  }
+
+  function fechamento(atividade) {
+    return Date.parse(atividade.encontros[0].inicio) - 30 * 60000;
+  }
+
+  function conflito(atividadeId, participanteId, novaAtividadeId) {
+    const novos = atividadeComEncontros(novaAtividadeId).encontros;
+    const existentes = db.prepare(
+      `SELECT e.inicio, e.fim FROM encontros e JOIN inscricoes i ON i.atividadeId = e.atividadeId
+       WHERE i.participanteId = ? AND i.status IN ('confirmada', 'convocada') AND i.atividadeId <> ?`,
+    ).all(participanteId, novaAtividadeId);
+    return novos.some((novo) => existentes.some((existente) => Date.parse(novo.inicio) < Date.parse(existente.fim) && Date.parse(existente.inicio) < Date.parse(novo.fim)));
+  }
+
+  function minicursosOcupando(participanteId) {
+    return db.prepare(
+      `SELECT COUNT(*) AS total FROM inscricoes i JOIN atividades a ON a.id = i.atividadeId
+       WHERE i.participanteId = ? AND i.status IN ('confirmada', 'convocada') AND a.tipo = 'minicurso'`,
+    ).get(participanteId).total;
+  }
+
+  function reconciliar() {
+    const agoraMs = Date.parse(agora());
+    const atividades = db.prepare('SELECT * FROM atividades').all();
+    for (const atividadeBase of atividades) {
+      const atividade = atividadeComEncontros(atividadeBase.id);
+      if (atividade.cancelada) continue;
+      const fechaEm = fechamento(atividade);
+      let mudou = true;
+      while (mudou) {
+        mudou = false;
+        const expiradas = db.prepare(
+          `SELECT * FROM inscricoes WHERE atividadeId = ? AND status = 'convocada' AND datetime(convocadaAte) < datetime(?)`,
+        ).all(atividade.id, agora());
+        for (const inscricao of expiradas) {
+          db.prepare("UPDATE inscricoes SET status = 'expirada', convocadaAte = NULL WHERE id = ?").run(inscricao.id);
+          if (agoraMs < fechaEm) {
+            const proxima = db.prepare(
+              `SELECT * FROM inscricoes WHERE atividadeId = ? AND status = 'em_espera' ORDER BY datetime(criadaEm), id LIMIT 1`,
+            ).get(atividade.id);
+            if (proxima) {
+              const prazo = Math.min(Date.parse(inscricao.convocadaAte) + 2 * 60 * 60000, fechaEm);
+              if (prazo > agoraMs) db.prepare("UPDATE inscricoes SET status = 'convocada', convocadaAte = ? WHERE id = ?").run(new Date(prazo).toISOString(), proxima.id);
+            }
+          }
+          mudou = true;
+        }
+      }
+    }
+  }
+
+  function convocarVagas(atividadeId, quantidade) {
+    const atividade = atividadeComEncontros(atividadeId);
+    if (!atividade || atividade.cancelada || Date.parse(agora()) >= fechamento(atividade)) return;
+    const fila = db.prepare("SELECT * FROM inscricoes WHERE atividadeId = ? AND status = 'em_espera' ORDER BY datetime(criadaEm), id").all(atividadeId);
+    const vagas = Math.min(quantidade, fila.length);
+    const prazo = new Date(Math.min(Date.parse(agora()) + 2 * 60 * 60000, fechamento(atividade))).toISOString();
+    for (let indice = 0; indice < vagas; indice += 1) {
+      db.prepare("UPDATE inscricoes SET status = 'convocada', convocadaAte = ? WHERE id = ?").run(prazo, fila[indice].id);
+    }
+  }
+
+  function apresentarInscricao(inscricao) {
+    const posicao = inscricao.status === 'em_espera'
+      ? db.prepare("SELECT COUNT(*) AS total FROM inscricoes WHERE atividadeId = ? AND status = 'em_espera' AND (datetime(criadaEm) < datetime(?) OR (criadaEm = ? AND id <= ?))").get(inscricao.atividadeId, inscricao.criadaEm, inscricao.criadaEm, inscricao.id).total
+      : null;
+    return { id: inscricao.id, atividadeId: inscricao.atividadeId, participanteId: inscricao.participanteId, status: inscricao.status, posicaoNaEspera: posicao, convocadaAte: inscricao.status === 'convocada' ? inscricao.convocadaAte : null, criadaEm: inscricao.criadaEm };
+  }
+
+  app.use((req, _res, next) => { reconciliar(); next(); });
+
+  app.post('/atividades/:id/inscricoes', exigirParticipante, (req, res) => {
+    const atividade = atividadeComEncontros(req.params.id);
+    if (!atividade) return erro(res, 404, 'NAO_ENCONTRADO');
+    if (atividade.cancelada) return erro(res, 422, 'ATIVIDADE_CANCELADA');
+    if (Date.parse(agora()) >= fechamento(atividade)) return erro(res, 422, 'INSCRICOES_ENCERRADAS');
+    const ativa = db.prepare("SELECT * FROM inscricoes WHERE atividadeId = ? AND participanteId = ? AND status IN ('confirmada', 'em_espera', 'convocada')").get(req.params.id, req.usuario.id);
+    if (ativa) return erro(res, 409, 'JA_INSCRITO');
+    const ocupadas = db.prepare("SELECT COUNT(*) AS total FROM inscricoes WHERE atividadeId = ? AND status IN ('confirmada', 'convocada')").get(req.params.id).total;
+    const status = ocupadas < atividade.vagas ? 'confirmada' : 'em_espera';
+    if (status === 'confirmada' && conflito(req.params.id, req.usuario.id, req.params.id)) return erro(res, 409, 'CONFLITO_DE_HORARIO');
+    if (status === 'confirmada' && atividade.tipo === 'minicurso' && minicursosOcupando(req.usuario.id) >= 3) return erro(res, 422, 'LIMITE_DE_MINICURSOS');
+    const inscricao = { id: gerarId('ins'), atividadeId: req.params.id, participanteId: req.usuario.id, status, criadaEm: agora(), convocadaAte: null };
+    db.prepare('INSERT INTO inscricoes (id, atividadeId, participanteId, status, criadaEm, convocadaAte) VALUES (?, ?, ?, ?, ?, ?)').run(inscricao.id, inscricao.atividadeId, inscricao.participanteId, inscricao.status, inscricao.criadaEm, null);
+    return res.status(201).json(apresentarInscricao(inscricao));
+  });
+
+  app.get('/inscricoes', (req, res) => {
+    const condicoes = [];
+    const parametros = [];
+    if (req.usuario.papel !== 'organizacao') {
+      condicoes.push('participanteId = ?');
+      parametros.push(req.usuario.id);
+    }
+    if (req.query.atividadeId) {
+      condicoes.push('atividadeId = ?');
+      parametros.push(req.query.atividadeId);
+    }
+    const where = condicoes.length ? `WHERE ${condicoes.join(' AND ')}` : '';
+    const inscricoes = db.prepare(`SELECT * FROM inscricoes ${where} ORDER BY datetime(criadaEm) DESC, id DESC`).all(...parametros);
+    return res.json(inscricoes.map(apresentarInscricao));
+  });
+
+  app.get('/inscricoes/:id', (req, res) => {
+    const inscricao = db.prepare('SELECT * FROM inscricoes WHERE id = ?').get(req.params.id);
+    if (!inscricao || (req.usuario.papel !== 'organizacao' && inscricao.participanteId !== req.usuario.id)) return erro(res, 404, 'NAO_ENCONTRADO');
+    return res.json(apresentarInscricao(inscricao));
+  });
+
+  app.post('/inscricoes/:id/cancelamento', exigirParticipante, (req, res) => {
+    const inscricao = db.prepare('SELECT * FROM inscricoes WHERE id = ?').get(req.params.id);
+    if (!inscricao || inscricao.participanteId !== req.usuario.id) return erro(res, 404, 'NAO_ENCONTRADO');
+    const atividade = atividadeComEncontros(inscricao.atividadeId);
+    if (Date.parse(agora()) >= Date.parse(atividade.encontros[0].inicio)) return erro(res, 422, 'ATIVIDADE_JA_INICIADA');
+    if (!['confirmada', 'convocada', 'em_espera'].includes(inscricao.status)) return erro(res, 422, 'INSCRICAO_INATIVA');
+    const liberou = ['confirmada', 'convocada'].includes(inscricao.status);
+    db.prepare("UPDATE inscricoes SET status = 'cancelada', convocadaAte = NULL WHERE id = ?").run(inscricao.id);
+    if (liberou) convocarVagas(inscricao.atividadeId, 1);
+    return res.json(apresentarInscricao(db.prepare('SELECT * FROM inscricoes WHERE id = ?').get(inscricao.id)));
+  });
+
+  app.post('/inscricoes/:id/confirmacao', exigirParticipante, (req, res) => {
+    const inscricao = db.prepare('SELECT * FROM inscricoes WHERE id = ?').get(req.params.id);
+    if (!inscricao || inscricao.participanteId !== req.usuario.id) return erro(res, 404, 'NAO_ENCONTRADO');
+    const atividade = atividadeComEncontros(inscricao.atividadeId);
+    if (atividade.cancelada) return erro(res, 422, 'ATIVIDADE_CANCELADA');
+    if (inscricao.status !== 'convocada') return erro(res, 422, inscricao.status === 'expirada' ? 'CONVOCACAO_EXPIRADA' : 'SEM_CONVOCACAO');
+    if (conflito(inscricao.atividadeId, req.usuario.id, inscricao.atividadeId)) return erro(res, 409, 'CONFLITO_DE_HORARIO');
+    if (atividade.tipo === 'minicurso' && minicursosOcupando(req.usuario.id) - 1 >= 3) return erro(res, 422, 'LIMITE_DE_MINICURSOS');
+    db.prepare("UPDATE inscricoes SET status = 'confirmada', convocadaAte = NULL WHERE id = ?").run(inscricao.id);
+    return res.json(apresentarInscricao(db.prepare('SELECT * FROM inscricoes WHERE id = ?').get(inscricao.id)));
   });
 
   app.get('/salas', (_req, res) => {
@@ -621,6 +761,7 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
     if (vagas < inscricoesAtivas) return erro(res, 409, 'VAGAS_ABAIXO_DOS_INSCRITOS');
 
     db.prepare('UPDATE atividades SET titulo = ?, vagas = ? WHERE id = ?').run(titulo, vagas, req.params.id);
+    if (vagas > atividade.vagas) convocarVagas(req.params.id, vagas - atividade.vagas);
     const atualizada = db.prepare('SELECT * FROM atividades WHERE id = ?').get(req.params.id);
     res.json(montarAtividade(db, atualizada, agora()));
   });
