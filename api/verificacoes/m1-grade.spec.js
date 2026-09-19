@@ -493,3 +493,132 @@ describe('M1 grade de atividades - fatia 2', () => {
     expect(abaixo.corpo.erro).toBe('VAGAS_ABAIXO_DOS_INSCRITOS');
   });
 });
+
+describe('M1 grade de atividades - fatia 3', () => {
+  let api;
+
+  beforeEach(async () => {
+    api = await iniciarApi();
+    await fetch(`${api.baseUrl}/_teste/reset`, { method: 'POST' });
+  });
+
+  afterEach(async () => {
+    await api.fechar();
+  });
+
+  it('cancela atividade antes do inicio e recusa cancelamento no instante do primeiro inicio', async () => {
+    const antesDoInicio = await criarAtividade(api.baseUrl, {
+      titulo: 'Cancelamento permitido',
+      tipo: 'palestra',
+      salaId: 'sala-101',
+      vagas: 40,
+      encontros: [{ inicio: '2026-10-20T09:00:00-03:00', fim: '2026-10-20T10:00:00-03:00' }],
+    });
+    const noInicio = await criarAtividade(api.baseUrl, {
+      titulo: 'Cancelamento recusado',
+      tipo: 'palestra',
+      salaId: 'sala-102',
+      vagas: 40,
+      encontros: [{ inicio: '2026-10-20T09:00:00-03:00', fim: '2026-10-20T10:00:00-03:00' }],
+    });
+
+    const canceladaAntes = await requisitarJson(api.baseUrl, `/atividades/${antesDoInicio.corpo.id}/cancelamento`, {
+      method: 'POST',
+    });
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T09:00:00-03:00' }),
+    });
+    const canceladaNoInicio = await requisitarJson(api.baseUrl, `/atividades/${noInicio.corpo.id}/cancelamento`, {
+      method: 'POST',
+    });
+
+    expect(canceladaAntes.status).toBe(200);
+    expect(canceladaAntes.corpo.situacao).toBe('cancelada');
+    expect(canceladaNoInicio.status).toBe(422);
+    expect(canceladaNoInicio.corpo.erro).toBe('ATIVIDADE_JA_INICIADA');
+  });
+
+  it('recusa cancelar atividade ja cancelada', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Cancelamento definitivo',
+      tipo: 'palestra',
+      salaId: 'sala-101',
+      vagas: 40,
+      encontros: [{ inicio: '2026-10-20T11:00:00-03:00', fim: '2026-10-20T12:00:00-03:00' }],
+    });
+
+    const primeiroCancelamento = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}/cancelamento`, {
+      method: 'POST',
+    });
+    const segundoCancelamento = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}/cancelamento`, {
+      method: 'POST',
+    });
+
+    expect(primeiroCancelamento.status).toBe(200);
+    expect(segundoCancelamento.status).toBe(422);
+    expect(segundoCancelamento.corpo.erro).toBe('ATIVIDADE_CANCELADA');
+  });
+
+  it('calcula contadores por status das inscricoes', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Contadores por status',
+      tipo: 'palestra',
+      salaId: 'sala-101',
+      vagas: 10,
+      encontros: [{ inicio: '2026-10-20T13:00:00-03:00', fim: '2026-10-20T14:00:00-03:00' }],
+    });
+    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
+      method: 'POST',
+      body: JSON.stringify({
+        atividadeId: criada.corpo.id,
+        inscricoes: [
+          { status: 'confirmada' },
+          { status: 'confirmada' },
+          { status: 'convocada' },
+          { status: 'em_espera' },
+          { status: 'em_espera' },
+          { status: 'em_espera' },
+          { status: 'em_espera' },
+          { status: 'cancelada' },
+          { status: 'expirada' },
+        ],
+      }),
+    });
+
+    const leitura = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`);
+
+    expect(leitura.status).toBe(200);
+    expect(leitura.corpo).toMatchObject({ ocupadas: 3, emEspera: 4, vagasRestantes: 7 });
+  });
+
+  it('cancela inscricoes ativas ao cancelar atividade e recalcula contadores', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Cancelamento com inscricoes',
+      tipo: 'palestra',
+      salaId: 'sala-101',
+      vagas: 5,
+      encontros: [{ inicio: '2026-10-20T15:00:00-03:00', fim: '2026-10-20T16:00:00-03:00' }],
+    });
+    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
+      method: 'POST',
+      body: JSON.stringify({
+        atividadeId: criada.corpo.id,
+        inscricoes: [
+          { status: 'confirmada' },
+          { status: 'convocada' },
+          { status: 'em_espera' },
+        ],
+      }),
+    });
+
+    const cancelada = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}/cancelamento`, {
+      method: 'POST',
+    });
+    const leitura = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`);
+
+    expect(cancelada.status).toBe(200);
+    expect(cancelada.corpo).toMatchObject({ situacao: 'cancelada', ocupadas: 0, emEspera: 0, vagasRestantes: 5 });
+    expect(leitura.corpo).toMatchObject({ situacao: 'cancelada', ocupadas: 0, emEspera: 0, vagasRestantes: 5 });
+  });
+});

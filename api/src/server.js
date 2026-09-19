@@ -104,6 +104,20 @@ function montarAtividade(db, atividade, agoraIso) {
   const encontros = db
     .prepare('SELECT id, inicio, fim FROM encontros WHERE atividadeId = ? ORDER BY datetime(inicio) ASC')
     .all(atividade.id);
+  const ocupadas = db
+    .prepare(
+      `SELECT COUNT(*) AS total
+       FROM inscricoes
+       WHERE atividadeId = ? AND status IN ('confirmada', 'convocada')`,
+    )
+    .get(atividade.id).total;
+  const emEspera = db
+    .prepare(
+      `SELECT COUNT(*) AS total
+       FROM inscricoes
+       WHERE atividadeId = ? AND status = 'em_espera'`,
+    )
+    .get(atividade.id).total;
 
   return {
     id: atividade.id,
@@ -114,9 +128,9 @@ function montarAtividade(db, atividade, agoraIso) {
     encontros,
     cargaHorariaMinutos: cargaHorariaMinutos(encontros),
     situacao: calcularSituacao(atividade, encontros, agoraIso),
-    ocupadas: 0,
-    vagasRestantes: atividade.vagas,
-    emEspera: 0,
+    ocupadas,
+    vagasRestantes: atividade.vagas - ocupadas,
+    emEspera,
   };
 }
 
@@ -401,8 +415,25 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
   app.post('/atividades/:id/cancelamento', exigirOrganizacao, (req, res) => {
     const atividade = db.prepare('SELECT * FROM atividades WHERE id = ?').get(req.params.id);
     if (!atividade) return erro(res, 404, 'NAO_ENCONTRADO');
+    if (atividade.cancelada) return erro(res, 422, 'ATIVIDADE_CANCELADA');
 
-    db.prepare('UPDATE atividades SET cancelada = 1 WHERE id = ?').run(req.params.id);
+    const primeiroEncontro = db
+      .prepare('SELECT inicio FROM encontros WHERE atividadeId = ? ORDER BY datetime(inicio) ASC LIMIT 1')
+      .get(req.params.id);
+    if (Date.parse(agora()) >= Date.parse(primeiroEncontro.inicio)) {
+      return erro(res, 422, 'ATIVIDADE_JA_INICIADA');
+    }
+
+    db.transaction(() => {
+      db.prepare('UPDATE inscricoes SET status = ? WHERE atividadeId = ? AND status IN (?, ?, ?)').run(
+        'cancelada',
+        req.params.id,
+        'confirmada',
+        'convocada',
+        'em_espera',
+      );
+      db.prepare('UPDATE atividades SET cancelada = 1 WHERE id = ?').run(req.params.id);
+    })();
     const cancelada = db.prepare('SELECT * FROM atividades WHERE id = ?').get(req.params.id);
     res.json(montarAtividade(db, cancelada, agora()));
   });
