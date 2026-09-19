@@ -5,5 +5,5 @@ Cada integrante é dono de um módulo inteiro: entrevista, spec, testes, API, te
 | Módulo                            | Dono             | Usuário do GitHub |
 | --------------------------------- | ---------------- | ----------------- |
 | M1 — Grade de atividades          | Pedro Casacchi   | PedroCasacchi1    |
-| M2 — Inscrições e lista de espera | Gustavo Tramarin |                   |
-| M3 — Presença por QR              | Pedro Casacchi   | PedroCasacchi1    |
+| M2 — Inscrições e lista de espera | Pedro Casacchi   | PedroCasacchi1    |
+| M3 — Presença por QR              | Gustavo Tramarin |                   |
