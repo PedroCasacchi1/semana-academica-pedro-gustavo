@@ -367,7 +367,7 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
 
   app.post('/encontros/:id/presencas', exigirParticipante, (req, res) => {
     const encontro = db
-      .prepare('SELECT e.id, e.inicio, e.atividadeId FROM encontros e JOIN atividades a ON a.id = e.atividadeId WHERE e.id = ?')
+      .prepare('SELECT e.id, e.inicio, e.fim, e.atividadeId FROM encontros e JOIN atividades a ON a.id = e.atividadeId WHERE e.id = ?')
       .get(req.params.id);
     if (!encontro) return erro(res, 404, 'NAO_ENCONTRADO');
 
@@ -384,16 +384,26 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
       .get(encontro.atividadeId, req.usuario.id);
     if (!inscricao) return erro(res, 403, 'NAO_INSCRITO');
 
-    const agoraIso = agora();
-    const agoraMs = Date.parse(agoraIso);
+    const registradaEm = agora();
+    const leituraOffline = typeof req.body?.lidoEm === 'string';
+    const lidoEmEnviado = leituraOffline ? req.body.lidoEm : registradaEm;
+    const lidoEm = leituraOffline && Date.parse(lidoEmEnviado) > Date.parse(registradaEm)
+      ? registradaEm
+      : lidoEmEnviado;
+    const instanteRegraMs = Date.parse(lidoEm);
     const inicioMs = Date.parse(encontro.inicio);
-    if (agoraMs < inicioMs - 15 * 60000 || agoraMs > inicioMs + 30 * 60000) {
+    const fimMs = Date.parse(encontro.fim);
+    if (Number.isNaN(instanteRegraMs)) return erro(res, 422, 'DADOS_INVALIDOS');
+    if (leituraOffline && Date.parse(registradaEm) > fimMs + 2 * 60 * 60000) {
+      return erro(res, 422, 'SINCRONIZACAO_TARDIA');
+    }
+    if (instanteRegraMs < inicioMs - 15 * 60000 || instanteRegraMs > inicioMs + 30 * 60000) {
       return erro(res, 422, 'FORA_DA_JANELA');
     }
 
     if (!req.body || typeof req.body.codigo !== 'string') return erro(res, 422, 'DADOS_INVALIDOS');
     const codigo = req.body.codigo.replaceAll(' ', '').toUpperCase();
-    const minuto = Math.floor(agoraMs / 60000);
+    const minuto = Math.floor(instanteRegraMs / 60000);
     if (codigo !== gerarCodigoQr(encontro.id, minuto) && codigo !== gerarCodigoQr(encontro.id, minuto - 1)) {
       return erro(res, 422, 'CODIGO_INVALIDO');
     }
@@ -402,9 +412,9 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
       id: gerarId('pre'),
       encontroId: encontro.id,
       participanteId: req.usuario.id,
-      origem: 'qr',
-      lidoEm: agoraIso,
-      registradaEm: agoraIso,
+      origem: leituraOffline ? 'qr_offline' : 'qr',
+      lidoEm,
+      registradaEm,
       justificativa: null,
     };
     db.prepare(

@@ -661,4 +661,190 @@ describe('M3 presenca por QR - fatia 1', () => {
 
     expect(resposta.status).toBe(201);
   });
+
+  it('aceita leitura offline dentro da janela enviada antes do limite de sincronizacao', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Offline dentro do prazo',
+      tipo: 'palestra',
+      salaId: 'auditorio',
+      vagas: 100,
+      encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
+    });
+    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
+      method: 'POST',
+      body: JSON.stringify({
+        atividadeId: criada.corpo.id,
+        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
+      }),
+    });
+    const encontroId = criada.corpo.encontros[0].id;
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T10:15:00-03:00' }),
+    });
+    const codigo = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/codigo`);
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T12:30:00-03:00' }),
+    });
+
+    const resposta = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/presencas`, {
+      method: 'POST',
+      headers: { 'X-Usuario': 'p-carla' },
+      body: JSON.stringify({ codigo: codigo.corpo.codigo, lidoEm: '2026-10-20T10:15:00-03:00' }),
+    });
+
+    expect(resposta.status).toBe(201);
+    expect(resposta.corpo).toMatchObject({
+      encontroId,
+      participanteId: 'p-carla',
+      origem: 'qr_offline',
+      lidoEm: '2026-10-20T10:15:00-03:00',
+      registradaEm: '2026-10-20T12:30:00-03:00',
+    });
+  });
+
+  it('recusa leitura offline sincronizada depois de fim mais duas horas', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Offline tarde demais',
+      tipo: 'palestra',
+      salaId: 'auditorio',
+      vagas: 100,
+      encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
+    });
+    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
+      method: 'POST',
+      body: JSON.stringify({
+        atividadeId: criada.corpo.id,
+        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
+      }),
+    });
+    const encontroId = criada.corpo.encontros[0].id;
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T10:15:00-03:00' }),
+    });
+    const codigo = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/codigo`);
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T13:00:01-03:00' }),
+    });
+
+    const resposta = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/presencas`, {
+      method: 'POST',
+      headers: { 'X-Usuario': 'p-carla' },
+      body: JSON.stringify({ codigo: codigo.corpo.codigo, lidoEm: '2026-10-20T10:15:00-03:00' }),
+    });
+
+    expect(resposta.status).toBe(422);
+    expect(resposta.corpo.erro).toBe('SINCRONIZACAO_TARDIA');
+  });
+
+  it('recusa lidoEm fora da janela mesmo com envio dentro dela', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Leitura fora da janela',
+      tipo: 'palestra',
+      salaId: 'auditorio',
+      vagas: 100,
+      encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
+    });
+    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
+      method: 'POST',
+      body: JSON.stringify({
+        atividadeId: criada.corpo.id,
+        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
+      }),
+    });
+    const encontroId = criada.corpo.encontros[0].id;
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T09:45:00-03:00' }),
+    });
+    const codigo = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/codigo`);
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
+    });
+
+    const resposta = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/presencas`, {
+      method: 'POST',
+      headers: { 'X-Usuario': 'p-carla' },
+      body: JSON.stringify({ codigo: codigo.corpo.codigo, lidoEm: '2026-10-20T09:44:59-03:00' }),
+    });
+
+    expect(resposta.status).toBe(422);
+    expect(resposta.corpo.erro).toBe('FORA_DA_JANELA');
+  });
+
+  it('descarta lidoEm posterior ao envio e preserva origem offline', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Relogio offline adiantado',
+      tipo: 'palestra',
+      salaId: 'auditorio',
+      vagas: 100,
+      encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
+    });
+    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
+      method: 'POST',
+      body: JSON.stringify({
+        atividadeId: criada.corpo.id,
+        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
+      }),
+    });
+    const encontroId = criada.corpo.encontros[0].id;
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
+    });
+    const codigo = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/codigo`);
+
+    const resposta = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/presencas`, {
+      method: 'POST',
+      headers: { 'X-Usuario': 'p-carla' },
+      body: JSON.stringify({ codigo: codigo.corpo.codigo, lidoEm: '2026-10-20T10:05:00-03:00' }),
+    });
+
+    expect(resposta.status).toBe(201);
+    expect(resposta.corpo).toMatchObject({
+      origem: 'qr_offline',
+      lidoEm: '2026-10-20T10:00:00-03:00',
+      registradaEm: '2026-10-20T10:00:00-03:00',
+    });
+  });
+
+  it('confere codigo offline no instante de lidoEm e nao no envio', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Codigo no instante da leitura',
+      tipo: 'palestra',
+      salaId: 'auditorio',
+      vagas: 100,
+      encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
+    });
+    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
+      method: 'POST',
+      body: JSON.stringify({
+        atividadeId: criada.corpo.id,
+        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
+      }),
+    });
+    const encontroId = criada.corpo.encontros[0].id;
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
+    });
+    const codigo = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/codigo`);
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T10:02:00-03:00' }),
+    });
+
+    const resposta = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/presencas`, {
+      method: 'POST',
+      headers: { 'X-Usuario': 'p-carla' },
+      body: JSON.stringify({ codigo: codigo.corpo.codigo, lidoEm: '2026-10-20T10:00:00-03:00' }),
+    });
+
+    expect(resposta.status).toBe(201);
+    expect(resposta.corpo.origem).toBe('qr_offline');
+  });
 });
