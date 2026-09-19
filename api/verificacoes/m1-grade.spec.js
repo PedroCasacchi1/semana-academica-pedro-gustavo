@@ -353,3 +353,143 @@ describe('M1 grade de atividades - fatia 1', () => {
     expect(listagem.corpo.map((atividade) => atividade.id)).toEqual([minicursoNoDia.corpo.id]);
   });
 });
+
+describe('M1 grade de atividades - fatia 2', () => {
+  let api;
+
+  beforeEach(async () => {
+    api = await iniciarApi();
+    await fetch(`${api.baseUrl}/_teste/reset`, { method: 'POST' });
+  });
+
+  afterEach(async () => {
+    await api.fechar();
+  });
+
+  it('calcula situacao pelo relogio controlado', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Minicurso de situacao',
+      tipo: 'minicurso',
+      salaId: 'lab-3',
+      vagas: 20,
+      encontros: [
+        { inicio: '2026-10-20T09:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' },
+        { inicio: '2026-10-21T09:00:00-03:00', fim: '2026-10-21T11:00:00-03:00' },
+      ],
+    });
+
+    async function situacaoEm(agora) {
+      await requisitarJson(api.baseUrl, '/_teste/relogio', {
+        method: 'PUT',
+        body: JSON.stringify({ agora }),
+      });
+      const leitura = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`);
+      return leitura.corpo.situacao;
+    }
+
+    expect(await situacaoEm('2026-10-20T08:59:00-03:00')).toBe('prevista');
+    expect(await situacaoEm('2026-10-20T09:00:00-03:00')).toBe('em_andamento');
+    expect(await situacaoEm('2026-10-20T12:00:00-03:00')).toBe('em_andamento');
+    expect(await situacaoEm('2026-10-21T11:00:00-03:00')).toBe('encerrada');
+  });
+
+  it('altera titulo e vagas por PATCH em qualquer situacao nao cancelada', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Titulo original',
+      tipo: 'palestra',
+      salaId: 'sala-101',
+      vagas: 40,
+      encontros: [{ inicio: '2026-10-20T09:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
+    });
+
+    const prevista = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ titulo: 'Titulo previsto' }),
+    });
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T09:30:00-03:00' }),
+    });
+    const emAndamento = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ vagas: 35 }),
+    });
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T11:00:00-03:00' }),
+    });
+    const encerrada = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ titulo: 'Titulo encerrado', vagas: 30 }),
+    });
+
+    expect(prevista.status).toBe(200);
+    expect(prevista.corpo.titulo).toBe('Titulo previsto');
+    expect(emAndamento.status).toBe(200);
+    expect(emAndamento.corpo.vagas).toBe(35);
+    expect(emAndamento.corpo.situacao).toBe('em_andamento');
+    expect(encerrada.status).toBe(200);
+    expect(encerrada.corpo).toMatchObject({ titulo: 'Titulo encerrado', vagas: 30, situacao: 'encerrada' });
+  });
+
+  it('recusa PATCH de campo nao editavel e de atividade cancelada', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Atividade editavel',
+      tipo: 'palestra',
+      salaId: 'sala-102',
+      vagas: 40,
+      encontros: [{ inicio: '2026-10-20T13:00:00-03:00', fim: '2026-10-20T14:00:00-03:00' }],
+    });
+
+    const campoNaoEditavel = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ tipo: 'minicurso' }),
+    });
+    await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}/cancelamento`, { method: 'POST' });
+    const cancelada = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ titulo: 'Nao altera' }),
+    });
+
+    expect(campoNaoEditavel.status).toBe(422);
+    expect(campoNaoEditavel.corpo.erro).toBe('CAMPO_NAO_EDITAVEL');
+    expect(cancelada.status).toBe(422);
+    expect(cancelada.corpo.erro).toBe('ATIVIDADE_CANCELADA');
+  });
+
+  it('recusa reduzir vagas abaixo das inscricoes confirmadas ou convocadas', async () => {
+    const criada = await criarAtividade(api.baseUrl, {
+      titulo: 'Atividade com inscritos',
+      tipo: 'palestra',
+      salaId: 'sala-101',
+      vagas: 10,
+      encontros: [{ inicio: '2026-10-20T15:00:00-03:00', fim: '2026-10-20T16:00:00-03:00' }],
+    });
+    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
+      method: 'POST',
+      body: JSON.stringify({
+        atividadeId: criada.corpo.id,
+        inscricoes: [
+          { status: 'confirmada' },
+          { status: 'confirmada' },
+          { status: 'convocada' },
+          { status: 'em_espera' },
+        ],
+      }),
+    });
+
+    const noLimite = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ vagas: 3 }),
+    });
+    const abaixo = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ vagas: 2 }),
+    });
+
+    expect(noLimite.status).toBe(200);
+    expect(noLimite.corpo.vagas).toBe(3);
+    expect(abaixo.status).toBe(409);
+    expect(abaixo.corpo.erro).toBe('VAGAS_ABAIXO_DOS_INSCRITOS');
+  });
+});

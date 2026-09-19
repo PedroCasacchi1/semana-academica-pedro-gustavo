@@ -56,12 +56,18 @@ function criarBanco() {
       inicio TEXT NOT NULL,
       fim TEXT NOT NULL
     );
+
+    CREATE TABLE inscricoes (
+      id TEXT PRIMARY KEY,
+      atividadeId TEXT NOT NULL,
+      status TEXT NOT NULL
+    );
   `);
   return db;
 }
 
 function carregarDadosIniciais(db) {
-  db.exec('DELETE FROM encontros; DELETE FROM atividades; DELETE FROM salas; DELETE FROM usuarios;');
+  db.exec('DELETE FROM inscricoes; DELETE FROM encontros; DELETE FROM atividades; DELETE FROM salas; DELETE FROM usuarios;');
 
   const inserirUsuario = db.prepare('INSERT INTO usuarios (id, nome, papel) VALUES (?, ?, ?)');
   for (const usuario of USUARIOS_INICIAIS) inserirUsuario.run(...usuario);
@@ -80,7 +86,21 @@ function cargaHorariaMinutos(encontros) {
   }, 0);
 }
 
-function montarAtividade(db, atividade) {
+const AGORA_INICIAL_TESTE = '2026-10-13T09:00:00-03:00';
+
+function calcularSituacao(atividade, encontros, agoraIso) {
+  if (atividade.cancelada) return 'cancelada';
+
+  const agora = Date.parse(agoraIso);
+  const primeiroInicio = Date.parse(encontros[0].inicio);
+  const ultimoFim = Date.parse(encontros[encontros.length - 1].fim);
+
+  if (agora < primeiroInicio) return 'prevista';
+  if (agora >= ultimoFim) return 'encerrada';
+  return 'em_andamento';
+}
+
+function montarAtividade(db, atividade, agoraIso) {
   const encontros = db
     .prepare('SELECT id, inicio, fim FROM encontros WHERE atividadeId = ? ORDER BY datetime(inicio) ASC')
     .all(atividade.id);
@@ -93,7 +113,7 @@ function montarAtividade(db, atividade) {
     vagas: atividade.vagas,
     encontros,
     cargaHorariaMinutos: cargaHorariaMinutos(encontros),
-    situacao: atividade.cancelada ? 'cancelada' : 'prevista',
+    situacao: calcularSituacao(atividade, encontros, agoraIso),
     ocupadas: 0,
     vagasRestantes: atividade.vagas,
     emEspera: 0,
@@ -185,10 +205,32 @@ function corpoAtividadeValido(corpo) {
   );
 }
 
+function corpoPatchAtividadeValido(corpo) {
+  if (!corpo || typeof corpo !== 'object' || Array.isArray(corpo)) return false;
+  if ('titulo' in corpo && typeof corpo.titulo !== 'string') return false;
+  if ('vagas' in corpo && !Number.isInteger(corpo.vagas)) return false;
+  return true;
+}
+
+function inscricoesTesteValidas(corpo) {
+  const statusValidos = ['confirmada', 'convocada', 'em_espera', 'cancelada', 'expirada'];
+  return (
+    corpo &&
+    typeof corpo.atividadeId === 'string' &&
+    Array.isArray(corpo.inscricoes) &&
+    corpo.inscricoes.every((inscricao) => statusValidos.includes(inscricao.status))
+  );
+}
+
 export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {}) {
   const app = express();
   const db = criarBanco();
   carregarDadosIniciais(db);
+  let agoraControlado = AGORA_INICIAL_TESTE;
+
+  function agora() {
+    return modoTeste ? agoraControlado : new Date().toISOString();
+  }
 
   app.use(express.json());
 
@@ -200,6 +242,32 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
   if (modoTeste) {
     app.post('/_teste/reset', (_req, res) => {
       carregarDadosIniciais(db);
+      agoraControlado = AGORA_INICIAL_TESTE;
+      res.status(204).end();
+    });
+
+    app.put('/_teste/relogio', (req, res) => {
+      if (!req.body || typeof req.body.agora !== 'string' || Number.isNaN(Date.parse(req.body.agora))) {
+        return erro(res, 422, 'DADOS_INVALIDOS');
+      }
+
+      agoraControlado = req.body.agora;
+      res.json({ agora: agoraControlado });
+    });
+
+    app.get('/_teste/relogio', (_req, res) => {
+      res.json({ agora: agoraControlado });
+    });
+
+    app.post('/_teste/inscricoes', (req, res) => {
+      if (!inscricoesTesteValidas(req.body)) return erro(res, 422, 'DADOS_INVALIDOS');
+      const atividade = db.prepare('SELECT id FROM atividades WHERE id = ?').get(req.body.atividadeId);
+      if (!atividade) return erro(res, 404, 'NAO_ENCONTRADO');
+
+      const inserir = db.prepare('INSERT INTO inscricoes (id, atividadeId, status) VALUES (?, ?, ?)');
+      for (const inscricao of req.body.inscricoes) {
+        inserir.run(gerarId('ins'), req.body.atividadeId, inscricao.status);
+      }
       res.status(204).end();
     });
   }
@@ -266,12 +334,12 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
     inserir();
 
     const atividade = db.prepare('SELECT * FROM atividades WHERE id = ?').get(id);
-    res.status(201).json(montarAtividade(db, atividade));
+    res.status(201).json(montarAtividade(db, atividade, agora()));
   });
 
   app.get('/atividades', (req, res) => {
     const atividades = db.prepare('SELECT * FROM atividades').all();
-    let resposta = atividades.map((atividade) => montarAtividade(db, atividade));
+    let resposta = atividades.map((atividade) => montarAtividade(db, atividade, agora()));
 
     if (req.query.dia) {
       resposta = resposta.filter((atividade) => {
@@ -297,7 +365,37 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
     const atividade = db.prepare('SELECT * FROM atividades WHERE id = ?').get(req.params.id);
     if (!atividade) return erro(res, 404, 'NAO_ENCONTRADO');
 
-    res.json(montarAtividade(db, atividade));
+    res.json(montarAtividade(db, atividade, agora()));
+  });
+
+  app.patch('/atividades/:id', exigirOrganizacao, (req, res) => {
+    const atividade = db.prepare('SELECT * FROM atividades WHERE id = ?').get(req.params.id);
+    if (!atividade) return erro(res, 404, 'NAO_ENCONTRADO');
+    if (!corpoPatchAtividadeValido(req.body)) return erro(res, 422, 'DADOS_INVALIDOS');
+    if (atividade.cancelada) return erro(res, 422, 'ATIVIDADE_CANCELADA');
+    if ('tipo' in req.body || 'salaId' in req.body || 'encontros' in req.body) {
+      return erro(res, 422, 'CAMPO_NAO_EDITAVEL');
+    }
+
+    const titulo = 'titulo' in req.body ? req.body.titulo : atividade.titulo;
+    const vagas = 'vagas' in req.body ? req.body.vagas : atividade.vagas;
+    if (vagas < 1) return erro(res, 422, 'DADOS_INVALIDOS');
+
+    const sala = db.prepare('SELECT capacidade FROM salas WHERE id = ?').get(atividade.salaId);
+    if (vagas > sala.capacidade) return erro(res, 422, 'VAGAS_ACIMA_DA_CAPACIDADE');
+
+    const inscricoesAtivas = db
+      .prepare(
+        `SELECT COUNT(*) AS total
+         FROM inscricoes
+         WHERE atividadeId = ? AND status IN ('confirmada', 'convocada')`,
+      )
+      .get(req.params.id).total;
+    if (vagas < inscricoesAtivas) return erro(res, 409, 'VAGAS_ABAIXO_DOS_INSCRITOS');
+
+    db.prepare('UPDATE atividades SET titulo = ?, vagas = ? WHERE id = ?').run(titulo, vagas, req.params.id);
+    const atualizada = db.prepare('SELECT * FROM atividades WHERE id = ?').get(req.params.id);
+    res.json(montarAtividade(db, atualizada, agora()));
   });
 
   app.post('/atividades/:id/cancelamento', exigirOrganizacao, (req, res) => {
@@ -306,7 +404,7 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
 
     db.prepare('UPDATE atividades SET cancelada = 1 WHERE id = ?').run(req.params.id);
     const cancelada = db.prepare('SELECT * FROM atividades WHERE id = ?').get(req.params.id);
-    res.json(montarAtividade(db, cancelada));
+    res.json(montarAtividade(db, cancelada, agora()));
   });
 
   return app;
