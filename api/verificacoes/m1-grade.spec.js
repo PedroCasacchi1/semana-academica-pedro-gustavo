@@ -41,6 +41,20 @@ async function criarAtividade(baseUrl, dados) {
   });
 }
 
+async function inscrever(baseUrl, atividadeId, participanteId) {
+  return requisitarJson(baseUrl, `/atividades/${atividadeId}/inscricoes`, {
+    method: 'POST',
+    headers: { 'X-Usuario': participanteId },
+  });
+}
+
+async function cancelarInscricao(baseUrl, inscricaoId, participanteId) {
+  return requisitarJson(baseUrl, `/inscricoes/${inscricaoId}/cancelamento`, {
+    method: 'POST',
+    headers: { 'X-Usuario': participanteId },
+  });
+}
+
 describe('M1 grade de atividades - fatia 1', () => {
   let api;
 
@@ -551,21 +565,16 @@ describe('M1 grade de atividades - fatia 2', () => {
       titulo: 'Atividade com inscritos',
       tipo: 'palestra',
       salaId: 'sala-101',
-      vagas: 10,
+      vagas: 3,
       encontros: [{ inicio: '2026-10-20T15:00:00-03:00', fim: '2026-10-20T16:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [
-          { status: 'confirmada' },
-          { status: 'confirmada' },
-          { status: 'convocada' },
-          { status: 'em_espera' },
-        ],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-diego');
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-elisa');
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-fabio');
+    const inscricoes = await requisitarJson(api.baseUrl, `/inscricoes?atividadeId=${criada.corpo.id}`);
+    const carla = inscricoes.corpo.find((inscricao) => inscricao.participanteId === 'p-carla');
+    await cancelarInscricao(api.baseUrl, carla.id, 'p-carla');
 
     const noLimite = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`, {
       method: 'PATCH',
@@ -654,25 +663,31 @@ describe('M1 grade de atividades - fatia 3', () => {
       titulo: 'Contadores por status',
       tipo: 'palestra',
       salaId: 'sala-101',
-      vagas: 10,
+      vagas: 3,
       encontros: [{ inicio: '2026-10-20T13:00:00-03:00', fim: '2026-10-20T14:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [
-          { status: 'confirmada' },
-          { status: 'confirmada' },
-          { status: 'convocada' },
-          { status: 'em_espera' },
-          { status: 'em_espera' },
-          { status: 'em_espera' },
-          { status: 'em_espera' },
-          { status: 'cancelada' },
-          { status: 'expirada' },
-        ],
-      }),
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T09:00:00-03:00' }),
+    });
+    for (const participanteId of ['p-carla', 'p-diego', 'p-elisa', 'p-fabio', 'p-gabriela', 'p-heitor', 'p-isadora', 'p-joao']) {
+      await inscrever(api.baseUrl, criada.corpo.id, participanteId);
+    }
+    const inscricoes = await requisitarJson(api.baseUrl, `/inscricoes?atividadeId=${criada.corpo.id}`);
+    const carla = inscricoes.corpo.find((inscricao) => inscricao.participanteId === 'p-carla');
+    await cancelarInscricao(api.baseUrl, carla.id, 'p-carla');
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T11:01:00-03:00' }),
+    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
+    await requisitarJson(api.baseUrl, '/_teste/relogio', {
+      method: 'PUT',
+      body: JSON.stringify({ agora: '2026-10-20T12:30:00-03:00' }),
+    });
+    await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ vagas: 10 }),
     });
 
     const leitura = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}`);
@@ -689,17 +704,12 @@ describe('M1 grade de atividades - fatia 3', () => {
       vagas: 5,
       encontros: [{ inicio: '2026-10-20T15:00:00-03:00', fim: '2026-10-20T16:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [
-          { status: 'confirmada' },
-          { status: 'convocada' },
-          { status: 'em_espera' },
-        ],
-      }),
-    });
+    for (const participanteId of ['p-carla', 'p-diego', 'p-elisa', 'p-fabio', 'p-gabriela', 'p-heitor']) {
+      await inscrever(api.baseUrl, criada.corpo.id, participanteId);
+    }
+    const inscricoes = await requisitarJson(api.baseUrl, `/inscricoes?atividadeId=${criada.corpo.id}`);
+    const carla = inscricoes.corpo.find((inscricao) => inscricao.participanteId === 'p-carla');
+    await cancelarInscricao(api.baseUrl, carla.id, 'p-carla');
 
     const cancelada = await requisitarJson(api.baseUrl, `/atividades/${criada.corpo.id}/cancelamento`, {
       method: 'POST',

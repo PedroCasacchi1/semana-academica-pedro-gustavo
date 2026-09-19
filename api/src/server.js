@@ -256,16 +256,6 @@ function corpoPatchAtividadeValido(corpo) {
   return true;
 }
 
-function inscricoesTesteValidas(corpo) {
-  const statusValidos = ['confirmada', 'convocada', 'em_espera', 'cancelada', 'expirada'];
-  return (
-    corpo &&
-    typeof corpo.atividadeId === 'string' &&
-    Array.isArray(corpo.inscricoes) &&
-    corpo.inscricoes.every((inscricao) => statusValidos.includes(inscricao.status))
-  );
-}
-
 export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {}) {
   const app = express();
   const db = criarBanco();
@@ -303,19 +293,6 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
       res.json({ agora: agoraControlado });
     });
 
-     app.post('/_teste/inscricoes', (req, res) => {
-      if (!inscricoesTesteValidas(req.body)) return erro(res, 422, 'DADOS_INVALIDOS');
-      const atividade = db.prepare('SELECT id FROM atividades WHERE id = ?').get(req.body.atividadeId);
-      if (!atividade) return erro(res, 404, 'NAO_ENCONTRADO');
-
-      const inserir = db.prepare(
-         'INSERT INTO inscricoes (id, atividadeId, participanteId, status, criadaEm, convocadaAte) VALUES (?, ?, ?, ?, ?, ?)',
-      );
-      for (const inscricao of req.body.inscricoes) {
-        inserir.run(gerarId('ins'), req.body.atividadeId, inscricao.participanteId ?? null, inscricao.status, agora(), null);
-      }
-      res.status(204).end();
-    });
   }
 
   app.use((req, res, next) => {
@@ -372,14 +349,15 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
           `SELECT * FROM inscricoes WHERE atividadeId = ? AND status = 'convocada' AND datetime(convocadaAte) < datetime(?)`,
         ).all(atividade.id, agora());
         for (const inscricao of expiradas) {
+          const prazoAnterior = inscricao.convocadaAte;
           db.prepare("UPDATE inscricoes SET status = 'expirada', convocadaAte = NULL WHERE id = ?").run(inscricao.id);
           if (agoraMs < fechaEm) {
             const proxima = db.prepare(
               `SELECT * FROM inscricoes WHERE atividadeId = ? AND status = 'em_espera' ORDER BY datetime(criadaEm), id LIMIT 1`,
             ).get(atividade.id);
             if (proxima) {
-              const prazo = Math.min(Date.parse(inscricao.convocadaAte) + 2 * 60 * 60000, fechaEm);
-              if (prazo > agoraMs) db.prepare("UPDATE inscricoes SET status = 'convocada', convocadaAte = ? WHERE id = ?").run(new Date(prazo).toISOString(), proxima.id);
+              const prazo = Math.min(Date.parse(prazoAnterior) + 2 * 60 * 60000, fechaEm);
+              db.prepare("UPDATE inscricoes SET status = 'convocada', convocadaAte = ? WHERE id = ?").run(new Date(prazo).toISOString(), proxima.id);
             }
           }
           mudou = true;

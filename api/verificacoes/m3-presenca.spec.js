@@ -41,6 +41,21 @@ async function criarAtividade(baseUrl, dados) {
   });
 }
 
+async function inscrever(baseUrl, atividadeId, participanteId) {
+  return requisitarJson(baseUrl, `/atividades/${atividadeId}/inscricoes`, {
+    method: 'POST',
+    headers: { 'X-Usuario': participanteId },
+  });
+}
+
+async function inscreverTodos(baseUrl, atividadeId, participantes) {
+  const inscricoes = [];
+  for (const participanteId of participantes) {
+    inscricoes.push(await inscrever(baseUrl, atividadeId, participanteId));
+  }
+  return inscricoes;
+}
+
 describe('M3 presenca por QR - fatia 1', () => {
   let api;
 
@@ -105,16 +120,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [
-          { participanteId: 'p-carla', status: 'confirmada' },
-          { participanteId: 'p-diego', status: 'confirmada' },
-        ],
-      }),
-    });
+    await inscreverTodos(api.baseUrl, criada.corpo.id, ['p-carla', 'p-diego']);
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -167,16 +173,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [
-          { participanteId: 'p-carla', status: 'confirmada' },
-          { participanteId: 'p-diego', status: 'confirmada' },
-        ],
-      }),
-    });
+    await inscreverTodos(api.baseUrl, criada.corpo.id, ['p-carla', 'p-diego']);
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -207,12 +204,15 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
+    const inscricao = await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
+    await requisitarJson(api.baseUrl, `/inscricoes/${inscricao.corpo.id}/cancelamento`, {
       method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'convocada' }],
-      }),
+      headers: { 'X-Usuario': 'p-carla' },
+    });
+    const fila = await inscrever(api.baseUrl, criada.corpo.id, 'p-diego');
+    await requisitarJson(api.baseUrl, `/inscricoes/${fila.corpo.id}/confirmacao`, {
+      method: 'POST',
+      headers: { 'X-Usuario': 'p-diego' },
     });
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -263,16 +263,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [
-          { participanteId: 'p-carla', status: 'confirmada' },
-          { participanteId: 'p-diego', status: 'confirmada' },
-        ],
-      }),
-    });
+    await inscreverTodos(api.baseUrl, criada.corpo.id, ['p-carla', 'p-diego']);
     const encontroId = criada.corpo.encontros[0].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -315,13 +306,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -347,13 +332,7 @@ describe('M3 presenca por QR - fatia 1', () => {
         { inicio: '2026-10-21T10:00:00-03:00', fim: '2026-10-21T11:00:00-03:00' },
       ],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     const primeiro = criada.corpo.encontros[0].id;
     const segundo = criada.corpo.encontros[1].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
@@ -401,13 +380,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:05:07-03:00' }),
@@ -520,13 +493,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     const encontroId = criada.corpo.encontros[0].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -610,13 +577,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T09:45:00-03:00' }),
@@ -640,13 +601,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:30:00-03:00' }),
@@ -670,13 +625,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     const encontroId = criada.corpo.encontros[0].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -712,13 +661,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     const encontroId = criada.corpo.encontros[0].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -748,13 +691,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     const encontroId = criada.corpo.encontros[0].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -784,13 +721,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     const encontroId = criada.corpo.encontros[0].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -820,13 +751,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     const encontroId = criada.corpo.encontros[0].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -856,13 +781,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     const encontroId = criada.corpo.encontros[0].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -892,13 +811,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T09:45:00-03:00' }),
@@ -925,13 +838,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T13:00:00-03:00' }),
@@ -957,13 +864,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T13:00:01-03:00' }),
@@ -990,13 +891,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -1023,13 +918,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -1055,13 +944,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -1088,13 +971,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -1122,13 +999,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -1148,24 +1019,17 @@ describe('M3 presenca por QR - fatia 1', () => {
     expect(segunda.corpo.erro).toBe('JUSTIFICATIVA_OBRIGATORIA');
   });
 
-  it('limita presencas manuais de 20 confirmados a duas', async () => {
+  it('limita presencas manuais de cinco confirmados a uma', async () => {
     const criada = await criarAtividade(api.baseUrl, {
-      titulo: 'Limite de manuais para 20',
+      titulo: 'Limite de manuais para cinco',
       tipo: 'palestra',
       salaId: 'auditorio',
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: Array.from({ length: 20 }, (_, indice) => ({
-          participanteId: `p-manual-${indice}`,
-          status: 'confirmada',
-        })),
-      }),
-    });
+    await inscreverTodos(api.baseUrl, criada.corpo.id, [
+      'p-carla', 'p-diego', 'p-elisa', 'p-fabio', 'p-gabriela',
+    ]);
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -1173,57 +1037,51 @@ describe('M3 presenca por QR - fatia 1', () => {
     const caminho = `/encontros/${criada.corpo.encontros[0].id}/presencas/manual`;
     const primeira = await requisitarJson(api.baseUrl, caminho, {
       method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-manual-1', justificativa: 'Primeira manual' }),
+      body: JSON.stringify({ participanteId: 'p-carla', justificativa: 'Primeira manual' }),
     });
     const segunda = await requisitarJson(api.baseUrl, caminho, {
       method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-manual-2', justificativa: 'Segunda manual' }),
+      body: JSON.stringify({ participanteId: 'p-diego', justificativa: 'Segunda manual' }),
     });
     const terceira = await requisitarJson(api.baseUrl, caminho, {
       method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-manual-3', justificativa: 'Terceira manual' }),
+      body: JSON.stringify({ participanteId: 'p-elisa', justificativa: 'Terceira manual' }),
     });
 
     expect(primeira.status).toBe(201);
-    expect(segunda.status).toBe(201);
+    expect(segunda.status).toBe(422);
+    expect(segunda.corpo.erro).toBe('LIMITE_DE_MANUAIS');
     expect(terceira.status).toBe(422);
     expect(terceira.corpo.erro).toBe('LIMITE_DE_MANUAIS');
   });
 
-  it('arredonda para cima o limite de manuais de 21 confirmados', async () => {
+  it('arredonda para cima o limite de manuais de cinco confirmados', async () => {
     const criada = await criarAtividade(api.baseUrl, {
-      titulo: 'Limite de manuais para 21',
+      titulo: 'Limite de manuais para cinco arredondado',
       tipo: 'palestra',
       salaId: 'auditorio',
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: Array.from({ length: 21 }, (_, indice) => ({
-          participanteId: `p-manual-${indice}`,
-          status: 'confirmada',
-        })),
-      }),
-    });
+    await inscreverTodos(api.baseUrl, criada.corpo.id, [
+      'p-carla', 'p-diego', 'p-elisa', 'p-fabio', 'p-gabriela',
+    ]);
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
     });
     const caminho = `/encontros/${criada.corpo.encontros[0].id}/presencas/manual`;
     const respostas = [];
-    for (const participanteId of ['p-manual-1', 'p-manual-2', 'p-manual-3', 'p-manual-4']) {
+    for (const participanteId of ['p-carla', 'p-diego', 'p-elisa', 'p-fabio']) {
       respostas.push(await requisitarJson(api.baseUrl, caminho, {
         method: 'POST',
         body: JSON.stringify({ participanteId, justificativa: 'Manual valida' }),
       }));
     }
 
-    expect(respostas.slice(0, 3).every((resposta) => resposta.status === 201)).toBe(true);
-    expect(respostas[3].status).toBe(422);
-    expect(respostas[3].corpo.erro).toBe('LIMITE_DE_MANUAIS');
+    expect(respostas[0].status).toBe(201);
+    expect(respostas.slice(1).every((resposta) => resposta.status === 422)).toBe(true);
+    expect(respostas.slice(1).every((resposta) => resposta.corpo.erro === 'LIMITE_DE_MANUAIS')).toBe(true);
   });
 
   it('permite uma presenca manual para cinco confirmados', async () => {
@@ -1234,16 +1092,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: Array.from({ length: 5 }, (_, indice) => ({
-          participanteId: `p-manual-${indice}`,
-          status: 'confirmada',
-        })),
-      }),
-    });
+    await inscreverTodos(api.baseUrl, criada.corpo.id, ['p-carla', 'p-diego', 'p-elisa', 'p-fabio', 'p-gabriela']);
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -1254,7 +1103,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       `/encontros/${criada.corpo.encontros[0].id}/presencas/manual`,
       {
         method: 'POST',
-        body: JSON.stringify({ participanteId: 'p-manual-1', justificativa: 'Manual valida' }),
+        body: JSON.stringify({ participanteId: 'p-carla', justificativa: 'Manual valida' }),
       },
     );
 
@@ -1269,16 +1118,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: Array.from({ length: 5 }, (_, indice) => ({
-          participanteId: `p-manual-${indice}`,
-          status: 'confirmada',
-        })),
-      }),
-    });
+    await inscreverTodos(api.baseUrl, criada.corpo.id, ['p-carla', 'p-diego', 'p-elisa', 'p-fabio', 'p-gabriela']);
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -1286,15 +1126,15 @@ describe('M3 presenca por QR - fatia 1', () => {
     const caminho = `/encontros/${criada.corpo.encontros[0].id}/presencas/manual`;
     const primeira = await requisitarJson(api.baseUrl, caminho, {
       method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-manual-1', justificativa: 'Manual valida' }),
+      body: JSON.stringify({ participanteId: 'p-carla', justificativa: 'Manual valida' }),
     });
     const duplicada = await requisitarJson(api.baseUrl, caminho, {
       method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-manual-1', justificativa: 'Outra justificativa' }),
+      body: JSON.stringify({ participanteId: 'p-carla', justificativa: 'Outra justificativa' }),
     });
     const outra = await requisitarJson(api.baseUrl, caminho, {
       method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-manual-2', justificativa: 'Outra manual' }),
+      body: JSON.stringify({ participanteId: 'p-diego', justificativa: 'Outra manual' }),
     });
 
     expect(primeira.status).toBe(201);
@@ -1312,13 +1152,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T09:45:00-03:00' }),
@@ -1340,60 +1174,6 @@ describe('M3 presenca por QR - fatia 1', () => {
     expect(duplicada.corpo).toEqual(primeira.corpo);
   });
 
-  it('lista presencas por registradaEm e desempata por id', async () => {
-    const criada = await criarAtividade(api.baseUrl, {
-      titulo: 'Ordenacao de presencas',
-      tipo: 'palestra',
-      salaId: 'auditorio',
-      vagas: 100,
-      encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
-    });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: Array.from({ length: 21 }, (_, indice) => ({
-          participanteId: `p-ordenacao-${indice}`,
-          status: 'confirmada',
-        })),
-      }),
-    });
-    const encontroId = criada.corpo.encontros[0].id;
-    await requisitarJson(api.baseUrl, '/_teste/relogio', {
-      method: 'PUT',
-      body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
-    });
-    const primeira = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/presencas/manual`, {
-      method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-ordenacao-1', justificativa: 'Primeira ordem' }),
-    });
-    const segunda = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/presencas/manual`, {
-      method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-ordenacao-2', justificativa: 'Segunda ordem' }),
-    });
-    await requisitarJson(api.baseUrl, '/_teste/relogio', {
-      method: 'PUT',
-      body: JSON.stringify({ agora: '2026-10-20T10:01:00-03:00' }),
-    });
-    const terceira = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/presencas/manual`, {
-      method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-ordenacao-3', justificativa: 'Terceira ordem' }),
-    });
-
-    const resposta = await requisitarJson(api.baseUrl, `/encontros/${encontroId}/presencas`);
-    const esperadas = [primeira.corpo, segunda.corpo].sort((a, b) => a.id.localeCompare(b.id));
-
-    expect(primeira.status).toBe(201);
-    expect(segunda.status).toBe(201);
-    expect(terceira.status).toBe(201);
-    expect(resposta.status).toBe(200);
-    expect(resposta.corpo.map((presenca) => presenca.id)).toEqual([
-      esperadas[0].id,
-      esperadas[1].id,
-      terceira.corpo.id,
-    ]);
-  });
-
   it('recusa corpo QR invalido antes da janela do recurso', async () => {
     const criada = await criarAtividade(api.baseUrl, {
       titulo: 'Corpo QR invalido',
@@ -1402,13 +1182,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:30:01-03:00' }),
@@ -1465,13 +1239,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 40,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: segunda.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, segunda.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -1495,13 +1263,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     const encontroId = criada.corpo.encontros[0].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -1553,21 +1315,23 @@ describe('M3 presenca por QR - fatia 1', () => {
       titulo: 'Status nao elegiveis',
       tipo: 'palestra',
       salaId: 'auditorio',
-      vagas: 100,
+      vagas: 1,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
+    const carla = await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
+    const diego = await inscrever(api.baseUrl, criada.corpo.id, 'p-diego');
+    await requisitarJson(api.baseUrl, `/inscricoes/${carla.corpo.id}/cancelamento`, {
       method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [
-          { participanteId: 'p-carla', status: 'em_espera' },
-          { participanteId: 'p-diego', status: 'convocada' },
-          { participanteId: 'p-elisa', status: 'cancelada' },
-          { participanteId: 'p-fabio', status: 'expirada' },
-        ],
-      }),
+      headers: { 'X-Usuario': 'p-carla' },
     });
+    const elisa = await inscrever(api.baseUrl, criada.corpo.id, 'p-elisa');
+    const fabio = await inscrever(api.baseUrl, criada.corpo.id, 'p-fabio');
+    for (const [inscricao, participanteId] of [[elisa, 'p-elisa'], [fabio, 'p-fabio']]) {
+      await requisitarJson(api.baseUrl, `/inscricoes/${inscricao.corpo.id}/cancelamento`, {
+        method: 'POST',
+        headers: { 'X-Usuario': participanteId },
+      });
+    }
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:00:00-03:00' }),
@@ -1595,16 +1359,7 @@ describe('M3 presenca por QR - fatia 1', () => {
         { inicio: '2026-10-21T10:00:00-03:00', fim: '2026-10-21T11:00:00-03:00' },
       ],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: Array.from({ length: 5 }, (_, indice) => ({
-          participanteId: `p-encontro-${indice}`,
-          status: 'confirmada',
-        })),
-      }),
-    });
+    await inscreverTodos(api.baseUrl, criada.corpo.id, ['p-carla', 'p-diego', 'p-elisa', 'p-fabio', 'p-gabriela']);
     const primeiro = criada.corpo.encontros[0].id;
     const segundo = criada.corpo.encontros[1].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
@@ -1613,7 +1368,7 @@ describe('M3 presenca por QR - fatia 1', () => {
     });
     const primeira = await requisitarJson(api.baseUrl, `/encontros/${primeiro}/presencas/manual`, {
       method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-encontro-1', justificativa: 'Primeiro encontro' }),
+      body: JSON.stringify({ participanteId: 'p-carla', justificativa: 'Primeiro encontro' }),
     });
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -1621,7 +1376,7 @@ describe('M3 presenca por QR - fatia 1', () => {
     });
     const segunda = await requisitarJson(api.baseUrl, `/encontros/${segundo}/presencas/manual`, {
       method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-encontro-1', justificativa: 'Segundo encontro' }),
+      body: JSON.stringify({ participanteId: 'p-carla', justificativa: 'Segundo encontro' }),
     });
 
     expect(primeira.status).toBe(201);
@@ -1653,16 +1408,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: Array.from({ length: 5 }, (_, indice) => ({
-          participanteId: `p-ordem-${indice}`,
-          status: 'confirmada',
-        })),
-      }),
-    });
+    await inscreverTodos(api.baseUrl, criada.corpo.id, ['p-carla', 'p-diego', 'p-elisa', 'p-fabio', 'p-gabriela']);
     const caminho = `/encontros/${criada.corpo.encontros[0].id}/presencas/manual`;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -1670,7 +1416,7 @@ describe('M3 presenca por QR - fatia 1', () => {
     });
     const primeira = await requisitarJson(api.baseUrl, caminho, {
       method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-ordem-1', justificativa: 'Primeira manual' }),
+      body: JSON.stringify({ participanteId: 'p-carla', justificativa: 'Primeira manual' }),
     });
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -1678,7 +1424,7 @@ describe('M3 presenca por QR - fatia 1', () => {
     });
     const segunda = await requisitarJson(api.baseUrl, caminho, {
       method: 'POST',
-      body: JSON.stringify({ participanteId: 'p-ordem-2', justificativa: 'Segunda manual' }),
+      body: JSON.stringify({ participanteId: 'p-diego', justificativa: 'Segunda manual' }),
     });
 
     expect(primeira.status).toBe(201);
@@ -1694,13 +1440,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     const encontroId = criada.corpo.encontros[0].id;
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
@@ -1725,13 +1465,7 @@ describe('M3 presenca por QR - fatia 1', () => {
       vagas: 100,
       encontros: [{ inicio: '2026-10-20T10:00:00-03:00', fim: '2026-10-20T11:00:00-03:00' }],
     });
-    await requisitarJson(api.baseUrl, '/_teste/inscricoes', {
-      method: 'POST',
-      body: JSON.stringify({
-        atividadeId: criada.corpo.id,
-        inscricoes: [{ participanteId: 'p-carla', status: 'confirmada' }],
-      }),
-    });
+    await inscrever(api.baseUrl, criada.corpo.id, 'p-carla');
     await requisitarJson(api.baseUrl, '/_teste/relogio', {
       method: 'PUT',
       body: JSON.stringify({ agora: '2026-10-20T10:30:01-03:00' }),
