@@ -1,0 +1,241 @@
+import Database from 'better-sqlite3';
+import express from 'express';
+import { randomBytes } from 'node:crypto';
+
+const USUARIOS_INICIAIS = [
+  ['org-ana', 'Ana Beatriz Lima', 'organizacao'],
+  ['org-bruno', 'Bruno Tavares', 'organizacao'],
+  ['p-carla', 'Carla Mendes Souza', 'participante'],
+  ['p-diego', 'Diego Alves', 'participante'],
+  ['p-elisa', 'Elisa Fernandes da Rocha', 'participante'],
+  ['p-fabio', 'Fábio Nogueira', 'participante'],
+  ['p-gabriela', 'Gabriela Moura Castro', 'participante'],
+  ['p-heitor', 'Heitor Campos', 'participante'],
+  ['p-isadora', 'Isadora Ribeiro dos Santos', 'participante'],
+  ['p-joao', 'João Pedro Martins', 'participante'],
+];
+
+const SALAS_INICIAIS = [
+  ['auditorio', 'Auditório Central', 200],
+  ['sala-101', 'Sala 101', 40],
+  ['sala-102', 'Sala 102', 40],
+  ['lab-3', 'Laboratório 3', 20],
+];
+
+function erro(res, status, codigo, mensagem = codigo) {
+  return res.status(status).json({ erro: codigo, mensagem });
+}
+
+function criarBanco() {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE usuarios (
+      id TEXT PRIMARY KEY,
+      nome TEXT NOT NULL,
+      papel TEXT NOT NULL
+    );
+
+    CREATE TABLE salas (
+      id TEXT PRIMARY KEY,
+      nome TEXT NOT NULL,
+      capacidade INTEGER NOT NULL
+    );
+
+    CREATE TABLE atividades (
+      id TEXT PRIMARY KEY,
+      titulo TEXT NOT NULL,
+      tipo TEXT NOT NULL,
+      salaId TEXT NOT NULL,
+      vagas INTEGER NOT NULL,
+      cancelada INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE encontros (
+      id TEXT PRIMARY KEY,
+      atividadeId TEXT NOT NULL,
+      inicio TEXT NOT NULL,
+      fim TEXT NOT NULL
+    );
+  `);
+  return db;
+}
+
+function carregarDadosIniciais(db) {
+  db.exec('DELETE FROM encontros; DELETE FROM atividades; DELETE FROM salas; DELETE FROM usuarios;');
+
+  const inserirUsuario = db.prepare('INSERT INTO usuarios (id, nome, papel) VALUES (?, ?, ?)');
+  for (const usuario of USUARIOS_INICIAIS) inserirUsuario.run(...usuario);
+
+  const inserirSala = db.prepare('INSERT INTO salas (id, nome, capacidade) VALUES (?, ?, ?)');
+  for (const sala of SALAS_INICIAIS) inserirSala.run(...sala);
+}
+
+function gerarId(prefixo) {
+  return `${prefixo}_${randomBytes(4).toString('hex')}`;
+}
+
+function cargaHorariaMinutos(encontros) {
+  return encontros.reduce((total, encontro) => {
+    return total + (Date.parse(encontro.fim) - Date.parse(encontro.inicio)) / 60000;
+  }, 0);
+}
+
+function montarAtividade(db, atividade) {
+  const encontros = db
+    .prepare('SELECT id, inicio, fim FROM encontros WHERE atividadeId = ? ORDER BY datetime(inicio) ASC')
+    .all(atividade.id);
+
+  return {
+    id: atividade.id,
+    titulo: atividade.titulo,
+    tipo: atividade.tipo,
+    salaId: atividade.salaId,
+    vagas: atividade.vagas,
+    encontros,
+    cargaHorariaMinutos: cargaHorariaMinutos(encontros),
+    situacao: atividade.cancelada ? 'cancelada' : 'prevista',
+    ocupadas: 0,
+    vagasRestantes: atividade.vagas,
+    emEspera: 0,
+  };
+}
+
+function diaEmBrasilia(iso) {
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(iso));
+  const valor = Object.fromEntries(partes.map((parte) => [parte.type, parte.value]));
+  return `${valor.year}-${valor.month}-${valor.day}`;
+}
+
+function exigirOrganizacao(req, res, next) {
+  if (req.usuario.papel !== 'organizacao') return erro(res, 403, 'SOMENTE_ORGANIZACAO');
+  next();
+}
+
+function corpoAtividadeValido(corpo) {
+  return (
+    corpo &&
+    typeof corpo.titulo === 'string' &&
+    typeof corpo.tipo === 'string' &&
+    typeof corpo.salaId === 'string' &&
+    Number.isInteger(corpo.vagas) &&
+    Array.isArray(corpo.encontros) &&
+    corpo.encontros.every(
+      (encontro) => typeof encontro.inicio === 'string' && typeof encontro.fim === 'string',
+    )
+  );
+}
+
+export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {}) {
+  const app = express();
+  const db = criarBanco();
+  carregarDadosIniciais(db);
+
+  app.use(express.json());
+
+  if (modoTeste) {
+    app.post('/_teste/reset', (_req, res) => {
+      carregarDadosIniciais(db);
+      res.status(204).end();
+    });
+  }
+
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/_teste/')) return erro(res, 404, 'NAO_ENCONTRADO');
+
+    const usuarioId = req.get('X-Usuario');
+    const usuario = usuarioId
+      ? db.prepare('SELECT id, nome, papel FROM usuarios WHERE id = ?').get(usuarioId)
+      : null;
+
+    if (!usuario) return erro(res, 401, 'USUARIO_DESCONHECIDO');
+
+    req.usuario = usuario;
+    next();
+  });
+
+  app.get('/salas', (_req, res) => {
+    const salas = db.prepare('SELECT id, nome, capacidade FROM salas ORDER BY rowid').all();
+    res.json(salas);
+  });
+
+  app.post('/atividades', exigirOrganizacao, (req, res) => {
+    if (!corpoAtividadeValido(req.body)) return erro(res, 422, 'DADOS_INVALIDOS');
+
+    const id = gerarId('atv');
+    const encontrosOrdenados = [...req.body.encontros].sort(
+      (a, b) => Date.parse(a.inicio) - Date.parse(b.inicio),
+    );
+
+    const inserir = db.transaction(() => {
+      db.prepare(
+        'INSERT INTO atividades (id, titulo, tipo, salaId, vagas, cancelada) VALUES (?, ?, ?, ?, ?, 0)',
+      ).run(id, req.body.titulo, req.body.tipo, req.body.salaId, req.body.vagas);
+
+      const inserirEncontro = db.prepare(
+        'INSERT INTO encontros (id, atividadeId, inicio, fim) VALUES (?, ?, ?, ?)',
+      );
+      for (const encontro of encontrosOrdenados) {
+        inserirEncontro.run(gerarId('enc'), id, encontro.inicio, encontro.fim);
+      }
+    });
+
+    inserir();
+
+    const atividade = db.prepare('SELECT * FROM atividades WHERE id = ?').get(id);
+    res.status(201).json(montarAtividade(db, atividade));
+  });
+
+  app.get('/atividades', (req, res) => {
+    const atividades = db.prepare('SELECT * FROM atividades').all();
+    let resposta = atividades.map((atividade) => montarAtividade(db, atividade));
+
+    if (req.query.dia) {
+      resposta = resposta.filter((atividade) => {
+        return atividade.encontros.some((encontro) => diaEmBrasilia(encontro.inicio) === req.query.dia);
+      });
+    }
+
+    if (req.query.tipo) {
+      resposta = resposta.filter((atividade) => atividade.tipo === req.query.tipo);
+    }
+
+    resposta.sort((a, b) => {
+      const inicioA = Date.parse(a.encontros[0].inicio);
+      const inicioB = Date.parse(b.encontros[0].inicio);
+      if (inicioA !== inicioB) return inicioA - inicioB;
+      return a.titulo.localeCompare(b.titulo, 'pt-BR');
+    });
+
+    res.json(resposta);
+  });
+
+  app.get('/atividades/:id', (req, res) => {
+    const atividade = db.prepare('SELECT * FROM atividades WHERE id = ?').get(req.params.id);
+    if (!atividade) return erro(res, 404, 'NAO_ENCONTRADO');
+
+    res.json(montarAtividade(db, atividade));
+  });
+
+  app.post('/atividades/:id/cancelamento', exigirOrganizacao, (req, res) => {
+    const atividade = db.prepare('SELECT * FROM atividades WHERE id = ?').get(req.params.id);
+    if (!atividade) return erro(res, 404, 'NAO_ENCONTRADO');
+
+    db.prepare('UPDATE atividades SET cancelada = 1 WHERE id = ?').run(req.params.id);
+    const cancelada = db.prepare('SELECT * FROM atividades WHERE id = ?').get(req.params.id);
+    res.json(montarAtividade(db, cancelada));
+  });
+
+  return app;
+}
+
+if (process.argv[1] === new URL(import.meta.url).pathname) {
+  const porta = Number(process.env.PORT || 3000);
+  criarServidor().listen(porta, () => {
+    console.log(`API escutando na porta ${porta}`);
+  });
+}
