@@ -39,6 +39,159 @@ h3 {
   margin-top: 0;
 }
 
+.cabecalho-linha,
+.secao-cabecalho,
+.codigo-barra {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.cabecalho-linha h1 {
+  margin-bottom: 0;
+}
+
+.status-pill,
+.origem {
+  background: #d8f3e5;
+  border-radius: 999px;
+  color: #17633b;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 6px 10px;
+  text-transform: uppercase;
+}
+
+.navegacao {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.navegacao button {
+  background: transparent;
+  border: 1px solid #b8c0cc;
+  color: #536471;
+}
+
+.navegacao button.ativo,
+.navegacao button:hover {
+  background: #15202b;
+  border-color: #15202b;
+  color: #fff;
+}
+
+.codigo-tela {
+  background: #111c2f;
+  border-radius: 20px;
+  color: #fff;
+  margin-top: 28px;
+  min-height: min(680px, calc(100vh - 190px));
+  padding: clamp(20px, 5vw, 64px);
+}
+
+.codigo-tela .rotulo,
+.codigo-tela .texto-suave {
+  color: #94a9c7;
+}
+
+.codigo-tela h2 {
+  margin-bottom: 0;
+}
+
+.codigo-barra .seletor-encontro {
+  min-width: min(360px, 100%);
+}
+
+.codigo-barra select {
+  background: #1b2a43;
+  border-color: #3d5273;
+  color: #fff;
+}
+
+.codigo-hero {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 470px;
+  text-align: center;
+}
+
+.codigo-hero span {
+  color: #9db2ce;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.codigo-hero strong {
+  color: #f9c74f;
+  font-family: 'Courier New', monospace;
+  font-size: clamp(4rem, 16vw, 10rem);
+  letter-spacing: 0.16em;
+  line-height: 1;
+  margin: 28px 0;
+  padding-left: 0.16em;
+}
+
+.codigo-hero p {
+  color: #b5c6db;
+}
+
+.m3-formulario,
+.lista-presencas {
+  margin-top: 28px;
+  max-width: 920px;
+}
+
+.texto-suave,
+.estado-vazio {
+  color: #536471;
+}
+
+.formulario-presenca {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.7fr) auto;
+  margin-top: 24px;
+}
+
+.fila-offline {
+  background: #fff3cd;
+  border: 1px solid #e3bd54;
+  border-radius: 8px;
+  color: #664d03;
+  padding: 12px;
+}
+
+.tabela-wrap {
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  min-width: 720px;
+  width: 100%;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e5e9ee;
+  padding: 14px 10px;
+  text-align: left;
+}
+
+th {
+  color: #536471;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .painel {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
@@ -155,6 +308,30 @@ dd {
   .filtros,
   .formulario {
     grid-template-columns: 1fr;
+  }
+
+  .cabecalho-linha,
+  .secao-cabecalho,
+  .codigo-barra {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .codigo-barra .seletor-encontro,
+  .formulario-presenca {
+    width: 100%;
+  }
+
+  .formulario-presenca {
+    grid-template-columns: 1fr;
+  }
+
+  .codigo-hero {
+    min-height: 360px;
+  }
+
+  .codigo-hero strong {
+    font-size: clamp(3.2rem, 17vw, 6rem);
   }
 
   .campo-largo,

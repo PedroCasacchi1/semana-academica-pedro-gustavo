@@ -16,7 +16,9 @@ async function requisitar(caminho, opcoes = {}) {
 
   const corpo = await resposta.json();
   if (!resposta.ok) {
-    throw new Error(corpo.erro ? `${corpo.erro}: ${corpo.mensagem || corpo.erro}` : 'Erro na API');
+    const falha = new Error(corpo.erro ? `${corpo.erro}: ${corpo.mensagem || corpo.erro}` : 'Erro na API');
+    falha.status = resposta.status;
+    throw falha;
   }
   return corpo;
 }
@@ -43,4 +45,19 @@ export function criarAtividade(atividade) {
     usuario: USUARIO_ORGANIZACAO,
     body: JSON.stringify(atividade),
   });
+}
+
+export function obterCodigoEncontro(encontroId) {
+  return requisitar(`/encontros/${encontroId}/codigo`, { usuario: USUARIO_ORGANIZACAO });
+}
+
+export function registrarPresenca(encontroId, dados) {
+  return requisitar(`/encontros/${encontroId}/presencas`, {
+    method: 'POST',
+    body: JSON.stringify(dados),
+  });
+}
+
+export function listarPresencas(encontroId) {
+  return requisitar(`/encontros/${encontroId}/presencas`, { usuario: USUARIO_ORGANIZACAO });
 }

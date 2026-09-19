@@ -40,6 +40,8 @@ const atividades = [
   },
 ];
 
+let simularFalhaDeRede = false;
+
 function respostaJson(corpo, status = 200) {
   return Promise.resolve({
     ok: status >= 200 && status < 300,
@@ -65,11 +67,28 @@ function instalarFetchFake() {
     }
     if (endereco.pathname === '/atividades/atv_minicurso') return respostaJson(atividades[1]);
     if (endereco.pathname === '/atividades/atv_palestra') return respostaJson(atividades[0]);
+    if (endereco.pathname === '/encontros/enc_1/codigo') {
+      return respostaJson({
+        encontroId: 'enc_1',
+        codigo: 'K7M2QX',
+        trocaEm: '2026-10-19T19:01:00-03:00',
+        validoAte: '2026-10-19T19:02:00-03:00',
+      });
+    }
+    if (endereco.pathname === '/encontros/enc_1/presencas' && opcoes.method === 'POST') {
+      if (simularFalhaDeRede) return Promise.reject(new TypeError('Failed to fetch'));
+      return respostaJson({ id: 'pre_1', encontroId: 'enc_1', participanteId: 'p-carla', origem: 'qr_offline', lidoEm: '2026-10-19T19:00:00.000Z', registradaEm: '2026-10-19T19:00:01.000Z', justificativa: null }, 201);
+    }
+    if (endereco.pathname === '/encontros/enc_1/presencas') {
+      return respostaJson([{ id: 'pre_1', encontroId: 'enc_1', participanteId: 'p-carla', origem: 'qr', lidoEm: '2026-10-19T19:00:00.000Z', registradaEm: '2026-10-19T19:00:01.000Z', justificativa: null }]);
+    }
     return respostaJson({ erro: 'NAO_ENCONTRADO', mensagem: 'Nao encontrado' }, 404);
   });
 }
 
 beforeEach(() => {
+  localStorage.clear();
+  simularFalhaDeRede = false;
   instalarFetchFake();
 });
 
@@ -129,5 +148,65 @@ describe('App M1', () => {
       method: 'POST',
       usuario: 'org-ana',
     }));
+  });
+});
+
+describe('M3 presenca por QR', () => {
+  it('mostra o codigo do encontro para a organizacao', async () => {
+    const usuario = userEvent.setup();
+    render(<App />);
+
+    await usuario.click(await screen.findByRole('button', { name: 'Código QR' }));
+
+    expect(await screen.findByRole('heading', { name: 'Código do encontro' })).toBeInTheDocument();
+    expect(screen.getByText('K7M2QX')).toBeInTheDocument();
+  });
+
+  it('guarda leitura com lidoEm no localStorage quando a rede falha', async () => {
+    const usuario = userEvent.setup();
+    simularFalhaDeRede = true;
+    render(<App />);
+
+    await usuario.click(await screen.findByRole('button', { name: 'Registrar presenca' }));
+    await usuario.type(await screen.findByLabelText('Codigo QR'), 'K7M2QX');
+    await usuario.click(screen.getByRole('button', { name: 'Confirmar presenca' }));
+
+    expect(await screen.findByText(/Leitura guardada/)).toBeInTheDocument();
+    const fila = JSON.parse(localStorage.getItem('m3-presencas-offline'));
+    expect(fila).toHaveLength(1);
+    expect(fila[0]).toMatchObject({ encontroId: 'enc_1', codigo: 'K7M2QX' });
+    expect(fila[0].lidoEm).toMatch(/T/);
+  });
+
+  it('reenvia a fila offline quando a conexao volta', async () => {
+    const usuario = userEvent.setup();
+    simularFalhaDeRede = true;
+    render(<App />);
+
+    await usuario.click(await screen.findByRole('button', { name: 'Registrar presenca' }));
+    await usuario.type(await screen.findByLabelText('Codigo QR'), 'K7M2QX');
+    await usuario.click(screen.getByRole('button', { name: 'Confirmar presenca' }));
+    await screen.findByText(/Leitura guardada/);
+    const leitura = JSON.parse(localStorage.getItem('m3-presencas-offline'))[0];
+
+    simularFalhaDeRede = false;
+    window.dispatchEvent(new Event('online'));
+
+    await waitFor(() => expect(localStorage.getItem('m3-presencas-offline')).toBe('[]'));
+    expect(fetch).toHaveBeenCalledWith('http://localhost:3000/encontros/enc_1/presencas', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ codigo: 'K7M2QX', lidoEm: leitura.lidoEm }),
+    }));
+  });
+
+  it('lista presencas do encontro para a organizacao', async () => {
+    const usuario = userEvent.setup();
+    render(<App />);
+
+    await usuario.click(await screen.findByRole('button', { name: 'Lista de presencas' }));
+
+    expect(await screen.findByRole('heading', { name: 'Presencas registradas' })).toBeInTheDocument();
+    expect(screen.getByText('p-carla')).toBeInTheDocument();
+    expect(screen.getByText('qr')).toBeInTheDocument();
   });
 });

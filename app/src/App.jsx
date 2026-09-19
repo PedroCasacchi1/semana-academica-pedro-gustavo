@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react';
-import { criarAtividade, listarAtividades, listarSalas, obterAtividade } from './api.js';
+import {
+  criarAtividade,
+  listarAtividades,
+  listarPresencas,
+  listarSalas,
+  obterAtividade,
+  obterCodigoEncontro,
+  registrarPresenca,
+} from './api.js';
 
 const DIAS = ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23'];
 
@@ -31,6 +39,7 @@ function parseEncontros(texto) {
 }
 
 export function App() {
+  const [modo, setModo] = useState('grade');
   const [dia, setDia] = useState('');
   const [tipo, setTipo] = useState('');
   const [salas, setSalas] = useState([]);
@@ -40,6 +49,10 @@ export function App() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
   const [mensagem, setMensagem] = useState('');
+  const encontros = atividades.flatMap((atividade) => atividade.encontros.map((encontro) => ({
+    ...encontro,
+    atividadeTitulo: atividade.titulo,
+  })));
 
   async function carregarGrade(filtros = { dia, tipo }) {
     setErro('');
@@ -105,12 +118,26 @@ export function App() {
     <main className="pagina">
       <header>
         <p className="rotulo">Semana Academica 2026</p>
-        <h1>Grade de atividades</h1>
+        <div className="cabecalho-linha">
+          <h1>{modo === 'grade' ? 'Grade de atividades' : modo === 'codigo' ? 'Presenca ao vivo' : modo === 'registrar' ? 'Registrar presenca' : 'Presencas do encontro'}</h1>
+          <span className="status-pill">M3 · Presenca</span>
+        </div>
+        <nav className="navegacao" aria-label="Modulos">
+          <button type="button" className={modo === 'grade' ? 'ativo' : ''} onClick={() => setModo('grade')}>Grade</button>
+          <button type="button" className={modo === 'codigo' ? 'ativo' : ''} onClick={() => setModo('codigo')}>Código QR</button>
+          <button type="button" className={modo === 'registrar' ? 'ativo' : ''} onClick={() => setModo('registrar')}>Registrar presenca</button>
+          <button type="button" className={modo === 'lista' ? 'ativo' : ''} onClick={() => setModo('lista')}>Lista de presencas</button>
+        </nav>
       </header>
 
       {erro && <div role="alert" className="alerta">{erro}</div>}
       {mensagem && <p className="sucesso">{mensagem}</p>}
 
+      {modo === 'codigo' && <TelaCodigo encontros={encontros} carregando={carregando} />}
+      {modo === 'registrar' && <TelaRegistrar encontros={encontros} onErro={setErro} />}
+      {modo === 'lista' && <TelaListaPresencas encontros={encontros} onErro={setErro} />}
+
+      {modo === 'grade' && <>
       <section className="painel">
         <div>
           <h2>Programacao por dia</h2>
@@ -181,8 +208,184 @@ export function App() {
           <button type="submit">Criar atividade</button>
         </form>
       </section>
+      </>}
     </main>
   );
+}
+
+function SeletorEncontro({ encontros, value, onChange, label = 'Encontro' }) {
+  return (
+    <label className="seletor-encontro">
+      {label}
+      <select value={value} onChange={(evento) => onChange(evento.target.value)} disabled={!encontros.length}>
+        <option value="">Selecione um encontro</option>
+        {encontros.map((encontro) => (
+          <option key={encontro.id} value={encontro.id}>
+            {encontro.atividadeTitulo} · {formatarDataHora(encontro.inicio)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function TelaCodigo({ encontros, carregando }) {
+  const [encontroId, setEncontroId] = useState('');
+  const [codigo, setCodigo] = useState(null);
+  const [erroLocal, setErroLocal] = useState('');
+  const encontroAtual = encontros.find((encontro) => encontro.id === encontroId);
+
+  useEffect(() => {
+    if (!encontroId && encontros[0]) setEncontroId(encontros[0].id);
+  }, [encontros, encontroId]);
+
+  useEffect(() => {
+    let cancelado = false;
+    let temporizador;
+
+    async function buscar() {
+      if (!encontroId) return;
+      setErroLocal('');
+      try {
+        const novoCodigo = await obterCodigoEncontro(encontroId);
+        if (cancelado) return;
+        setCodigo(novoCodigo);
+        const atraso = Math.min(2147483647, Math.max(250, Date.parse(novoCodigo.trocaEm) - Date.now()));
+        temporizador = window.setTimeout(buscar, atraso);
+      } catch (falha) {
+        if (!cancelado) setErroLocal(falha.message);
+      }
+    }
+
+    buscar();
+    return () => {
+      cancelado = true;
+      window.clearTimeout(temporizador);
+    };
+  }, [encontroId]);
+
+  return (
+    <section className="codigo-tela">
+      <div className="codigo-barra">
+        <div>
+          <p className="rotulo">Painel da organizacao</p>
+          <h2>Código do encontro</h2>
+        </div>
+        <SeletorEncontro encontros={encontros} value={encontroId} onChange={setEncontroId} />
+      </div>
+      {carregando && <p>Carregando encontros...</p>}
+      {erroLocal && <div role="alert" className="alerta">{erroLocal}</div>}
+      {codigo && encontroAtual ? (
+        <div className="codigo-hero" aria-live="polite">
+          <span>{encontroAtual.atividadeTitulo}</span>
+          <strong>{codigo.codigo}</strong>
+          <p>Atualiza automaticamente às {formatarDataHora(codigo.trocaEm)}</p>
+        </div>
+      ) : <p className="estado-vazio">Escolha um encontro para exibir o código.</p>}
+    </section>
+  );
+}
+
+function TelaRegistrar({ encontros, onErro }) {
+  const [encontroId, setEncontroId] = useState('');
+  const [codigo, setCodigo] = useState('');
+  const [mensagemLocal, setMensagemLocal] = useState('');
+  const [pendentes, setPendentes] = useState(() => lerFilaPresencas());
+
+  useEffect(() => {
+    if (!encontroId && encontros[0]) setEncontroId(encontros[0].id);
+  }, [encontros, encontroId]);
+
+  useEffect(() => {
+    async function reenviar() {
+      const fila = lerFilaPresencas();
+      const restantes = [];
+      for (const leitura of fila) {
+        try {
+          await registrarPresenca(leitura.encontroId, { codigo: leitura.codigo, lidoEm: leitura.lidoEm });
+        } catch (falha) {
+          if (!falha.status) restantes.push(leitura);
+        }
+      }
+      salvarFilaPresencas(restantes);
+      setPendentes(restantes);
+    }
+    window.addEventListener('online', reenviar);
+    reenviar();
+    return () => window.removeEventListener('online', reenviar);
+  }, []);
+
+  async function enviar(evento) {
+    evento.preventDefault();
+    const leitura = { encontroId, codigo: codigo.trim(), lidoEm: new Date().toISOString() };
+    setMensagemLocal('');
+    onErro('');
+    try {
+      await registrarPresenca(encontroId, { codigo: leitura.codigo, lidoEm: leitura.lidoEm });
+      setMensagemLocal('Presenca registrada.');
+      setCodigo('');
+    } catch (falha) {
+      if (!falha.status) {
+        const fila = [...lerFilaPresencas(), leitura];
+        salvarFilaPresencas(fila);
+        setPendentes(fila);
+        setMensagemLocal('Sem conexao. Leitura guardada para reenvio.');
+      } else onErro(falha.message);
+    }
+  }
+
+  return (
+    <section className="cartao m3-formulario">
+      <p className="rotulo">Area do participante</p>
+      <h2>Registrar presenca</h2>
+      <p className="texto-suave">Digite o codigo exibido pela organizacao. A leitura fica guardada se a rede cair.</p>
+      <form onSubmit={enviar} className="formulario-presenca">
+        <SeletorEncontro encontros={encontros} value={encontroId} onChange={setEncontroId} />
+        <label>Codigo QR<input value={codigo} onChange={(evento) => setCodigo(evento.target.value.toUpperCase())} placeholder="K7M2QX" maxLength="6" required /></label>
+        <button type="submit">Confirmar presenca</button>
+      </form>
+      {mensagemLocal && <p className="sucesso">{mensagemLocal}</p>}
+      {pendentes.length > 0 && <p className="fila-offline">{pendentes.length} leitura(s) aguardando conexao.</p>}
+    </section>
+  );
+}
+
+function TelaListaPresencas({ encontros, onErro }) {
+  const [encontroId, setEncontroId] = useState('');
+  const [presencas, setPresencas] = useState([]);
+
+  useEffect(() => {
+    if (!encontroId && encontros[0]) setEncontroId(encontros[0].id);
+  }, [encontros, encontroId]);
+
+  useEffect(() => {
+    if (!encontroId) return;
+    listarPresencas(encontroId).then(setPresencas).catch((falha) => onErro(falha.message));
+  }, [encontroId, onErro]);
+
+  return (
+    <section className="cartao lista-presencas">
+      <div className="secao-cabecalho">
+        <div><p className="rotulo">Painel da organizacao</p><h2>Presencas registradas</h2></div>
+        <SeletorEncontro encontros={encontros} value={encontroId} onChange={setEncontroId} />
+      </div>
+      {!presencas.length ? <p className="estado-vazio">Nenhuma presenca neste encontro.</p> : (
+        <div className="tabela-wrap"><table><thead><tr><th>Participante</th><th>Origem</th><th>Leitura</th><th>Registro</th></tr></thead><tbody>
+          {presencas.map((presenca) => <tr key={presenca.id}><td>{presenca.participanteId}</td><td><span className="origem">{presenca.origem}</span></td><td>{formatarDataHora(presenca.lidoEm)}</td><td>{formatarDataHora(presenca.registradaEm)}</td></tr>)}
+        </tbody></table></div>
+      )}
+    </section>
+  );
+}
+
+const FILA_PRESENCAS = 'm3-presencas-offline';
+
+function lerFilaPresencas() {
+  try { return JSON.parse(localStorage.getItem(FILA_PRESENCAS) || '[]'); } catch { return []; }
+}
+
+function salvarFilaPresencas(fila) {
+  localStorage.setItem(FILA_PRESENCAS, JSON.stringify(fila));
 }
 
 function Detalhe({ atividade, salas }) {

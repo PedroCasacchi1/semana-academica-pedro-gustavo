@@ -376,6 +376,8 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
       .get(encontro.id, req.usuario.id);
     if (existente) return res.status(200).json(existente);
 
+    if (!req.body || typeof req.body.codigo !== 'string') return erro(res, 422, 'DADOS_INVALIDOS');
+
     const inscricao = db
       .prepare(
         `SELECT 1 FROM inscricoes
@@ -401,7 +403,6 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
       return erro(res, 422, 'FORA_DA_JANELA');
     }
 
-    if (!req.body || typeof req.body.codigo !== 'string') return erro(res, 422, 'DADOS_INVALIDOS');
     const codigo = req.body.codigo.replaceAll(' ', '').toUpperCase();
     const minuto = Math.floor(instanteRegraMs / 60000);
     if (codigo !== gerarCodigoQr(encontro.id, minuto) && codigo !== gerarCodigoQr(encontro.id, minuto - 1)) {
@@ -440,11 +441,12 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
     if (!encontro) return erro(res, 404, 'NAO_ENCONTRADO');
 
     const justificativa = req.body?.justificativa;
-    if (typeof justificativa !== 'string') {
+    if (typeof justificativa !== 'string' || justificativa.trim().length < 10) {
       return erro(res, 422, 'JUSTIFICATIVA_OBRIGATORIA');
     }
 
     const participanteId = req.body?.participanteId;
+    if (typeof participanteId !== 'string') return erro(res, 422, 'DADOS_INVALIDOS');
     const existente = db
       .prepare('SELECT * FROM presencas WHERE encontroId = ? AND participanteId = ?')
       .get(encontro.id, participanteId);
@@ -464,6 +466,16 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
     const fimMs = Date.parse(encontro.fim);
     if (registradaMs < inicioMs - 15 * 60000 || registradaMs > fimMs + 2 * 60 * 60000) {
       return erro(res, 422, 'FORA_DA_JANELA');
+    }
+
+    const confirmadas = db
+      .prepare("SELECT COUNT(*) AS total FROM inscricoes WHERE atividadeId = ? AND status = 'confirmada'")
+      .get(encontro.atividadeId).total;
+    const manuais = db
+      .prepare("SELECT COUNT(*) AS total FROM presencas WHERE encontroId = ? AND origem = 'manual'")
+      .get(encontro.id).total;
+    if (manuais >= Math.ceil(confirmadas * 0.1)) {
+      return erro(res, 422, 'LIMITE_DE_MANUAIS');
     }
 
     const presenca = {
@@ -489,6 +501,21 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
       presenca.justificativa,
     );
     return res.status(201).json(presenca);
+  });
+
+  app.get('/encontros/:id/presencas', exigirOrganizacao, (req, res) => {
+    const encontro = db.prepare('SELECT id FROM encontros WHERE id = ?').get(req.params.id);
+    if (!encontro) return erro(res, 404, 'NAO_ENCONTRADO');
+
+    const presencas = db
+      .prepare(
+        `SELECT id, encontroId, participanteId, origem, lidoEm, registradaEm, justificativa
+         FROM presencas
+         WHERE encontroId = ?
+         ORDER BY datetime(registradaEm) ASC, id ASC`,
+      )
+      .all(encontro.id);
+    return res.json(presencas);
   });
 
   app.post('/atividades', exigirOrganizacao, (req, res) => {
