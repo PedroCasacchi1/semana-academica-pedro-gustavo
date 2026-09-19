@@ -1,5 +1,3 @@
-@'
-
 # Semana Acadêmica
 
 ## Stack
@@ -21,4 +19,3 @@
 - O modo de teste e o relógio controlado definidos no contrato-api.md devem ser preservados.
 - Cada módulo deve ser desenvolvido com testes automatizados.
 - A implementação deve seguir TDD: teste falhando antes do código que faz o teste passar.
-  '@ | Set-Content AGENTS.md -Encoding UTF8
