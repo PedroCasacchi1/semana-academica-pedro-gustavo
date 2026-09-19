@@ -18,8 +18,12 @@ interface é HTTP: suba o servidor com `criarServidor()` e fale por `fetch`. Nã
 serviço nem repositório no teste — se importar, o teste quebra quando você refatorar
 sem que o comportamento tenha mudado.
 
-Padrão do projeto: `node --test`, `node:assert/strict`, um arquivo em `verificacoes/`,
-espelhando `verificacoes/livros.spec.js`. Sem framework, sem dependência, sem mock.
+Padrão deste projeto: Vitest, executado com `npm test`. Os testes ficam em
+`verificacoes/` e usam arquivos `*.spec.js`.
+
+Use `describe`, `it` e `expect` do Vitest. Teste o comportamento pela API HTTP usando
+`fetch`, sem importar diretamente serviços ou repositórios e sem acoplar o teste à
+implementação interna.
 
 ## O ciclo, por fatia
 
@@ -27,8 +31,8 @@ Para cada fatia da spec, nesta ordem:
 
 1. Escreva **um** teste que prova **um** critério de aceite. O nome do teste é a regra
    em português: `it('recusa o quarto empréstimo ativo do mesmo leitor')`.
-2. Rode. **Ele tem que falhar.** Teste que passa antes do código existir não está
-   testando nada — descubra por quê antes de seguir.
+2. Rode com `npm test`. **Ele tem que falhar.** Teste que passa antes do código existir
+   não está testando nada — descubra por quê antes de seguir.
 3. Escreva o mínimo de código que faz ele passar. Nada de já implementar a regra
    seguinte "que eu vou precisar mesmo".
 4. Rode a suíte inteira. Verde? Próxima fatia.
@@ -58,5 +62,6 @@ comum de mentir sozinho.
 
 ## Fechamento
 
-Terminada a última fatia, rode a suíte inteira uma vez e relate o número real que
-apareceu na saída. Não estime, não arredonde, não repita um número de outra rodada.
+Terminada a última fatia, rode `npm test` para executar a suíte inteira e relate o número
+real de testes que apareceu na saída. Não estime, não arredonde, não repita um número de
+outra rodada.
