@@ -1,0 +1,20 @@
+# Agentes e modelos usados
+
+## Agente principal
+
+- OpenCode: `openai/gpt-5.6-luna`.
+
+## Agentes do repositorio
+
+- `auditor`: subagente de auditoria de modulo; o arquivo `.opencode/agent/auditor.md` nao fixa um modelo.
+- `revisor-de-contrato`: subagente de verificacao do contrato; o arquivo `.opencode/agent/revisor-de-contrato.md` nao fixa um modelo.
+
+## Registro desta entrega
+
+- Entrevistas, specs, implementacao e testes de M2 e M3 executados pelo agente principal
+  do OpenCode com `openai/gpt-5.6-luna`.
+- O subagente `auditor` foi executado duas vezes: uma auditoria do M3 e uma do M2. Os
+  pareceres estao em `auditorias/`, e as sessoes correspondentes em
+  `evidencias/sessoes/gustavo-tramarin/`.
+- O subagente `revisor-de-contrato` foi criado, conferido com `opencode debug agent`,
+  mas nao foi executado em nenhuma auditoria desta entrega.

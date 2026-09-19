@@ -61,3 +61,20 @@ export function registrarPresenca(encontroId, dados) {
 export function listarPresencas(encontroId) {
   return requisitar(`/encontros/${encontroId}/presencas`, { usuario: USUARIO_ORGANIZACAO });
 }
+
+export function inscreverNaAtividade(atividadeId) {
+  return requisitar(`/atividades/${atividadeId}/inscricoes`, { method: 'POST' });
+}
+
+export function listarInscricoes(atividadeId) {
+  const consulta = atividadeId ? `?atividadeId=${encodeURIComponent(atividadeId)}` : '';
+  return requisitar(`/inscricoes${consulta}`);
+}
+
+export function cancelarInscricao(inscricaoId) {
+  return requisitar(`/inscricoes/${inscricaoId}/cancelamento`, { method: 'POST' });
+}
+
+export function confirmarInscricao(inscricaoId) {
+  return requisitar(`/inscricoes/${inscricaoId}/confirmacao`, { method: 'POST' });
+}

@@ -47,7 +47,7 @@ Status: Rodada 2 encerrada e confirmada.
 ### P-02 - Rotacao do codigo QR
 
 - Pergunta: Qual e a duracao de cada codigo QR? Quando `trocaEm` acontece em relacao a `validoAte`, e codigos anteriores continuam aceitos ate `validoAte` ou deixam de ser aceitos imediatamente quando um novo codigo e gerado?
-- Resposta: O codigo muda a cada minuto, em janelas alinhadas ao relogio, de `hh:mm:00` a `hh:mm:59`. Sao aceitos o codigo do minuto atual e o do minuto anterior. `trocaEm` e o inicio do minuto seguinte, quando a tela passa a mostrar um codigo novo, e `validoAte` e o inicio do minuto depois desse; o codigo anterior continua aceito durante todo o minuto em que ja existe um novo. Codigo de outro encontro ou de qualquer minuto mais antigo que o anterior retorna `CODIGO_INVALIDO`.
+- Resposta: A cada minuto, o QR e trocado seguindo intervalos alinhados ao relogio, que vao de `hh:mm:00` a `hh:mm:59`. Permanecem validos o codigo do minuto corrente e o do minuto imediatamente anterior. `trocaEm` marca o comeco do proximo minuto, momento em que a tela deve exibir o novo codigo; `validoAte` marca o inicio do minuto seguinte a esse. Assim, o codigo anterior continua valido por todo o minuto em que o novo ja esta disponivel. Codigo de outro encontro ou de um minuto anterior ao anterior e respondido com `CODIGO_INVALIDO`.
 - Fonte: RN-303 e RN-304.
 - Status: RESPONDIDA.
 

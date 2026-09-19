@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   criarAtividade,
+  cancelarInscricao,
+  confirmarInscricao,
+  inscreverNaAtividade,
+  listarInscricoes,
   listarAtividades,
   listarPresencas,
   listarSalas,
@@ -119,14 +123,15 @@ export function App() {
       <header>
         <p className="rotulo">Semana Academica 2026</p>
         <div className="cabecalho-linha">
-          <h1>{modo === 'grade' ? 'Grade de atividades' : modo === 'codigo' ? 'Presenca ao vivo' : modo === 'registrar' ? 'Registrar presenca' : 'Presencas do encontro'}</h1>
-          <span className="status-pill">M3 · Presenca</span>
+          <h1>{modo === 'grade' ? 'Grade de atividades' : modo === 'inscricoes' ? 'Minhas inscricoes' : modo === 'codigo' ? 'Presenca ao vivo' : modo === 'registrar' ? 'Registrar presenca' : 'Presencas do encontro'}</h1>
+          <span className="status-pill">M2 · Inscricoes</span>
         </div>
         <nav className="navegacao" aria-label="Modulos">
           <button type="button" className={modo === 'grade' ? 'ativo' : ''} onClick={() => setModo('grade')}>Grade</button>
           <button type="button" className={modo === 'codigo' ? 'ativo' : ''} onClick={() => setModo('codigo')}>Código QR</button>
           <button type="button" className={modo === 'registrar' ? 'ativo' : ''} onClick={() => setModo('registrar')}>Registrar presenca</button>
           <button type="button" className={modo === 'lista' ? 'ativo' : ''} onClick={() => setModo('lista')}>Lista de presencas</button>
+          <button type="button" className={modo === 'inscricoes' ? 'ativo' : ''} onClick={() => setModo('inscricoes')}>Minhas inscricoes</button>
         </nav>
       </header>
 
@@ -136,6 +141,7 @@ export function App() {
       {modo === 'codigo' && <TelaCodigo encontros={encontros} carregando={carregando} />}
       {modo === 'registrar' && <TelaRegistrar encontros={encontros} onErro={setErro} />}
       {modo === 'lista' && <TelaListaPresencas encontros={encontros} onErro={setErro} />}
+      {modo === 'inscricoes' && <TelaInscricoes atividades={atividades} onErro={setErro} onMensagem={setMensagem} />}
 
       {modo === 'grade' && <>
       <section className="painel">
@@ -174,7 +180,7 @@ export function App() {
           </ul>
         </div>
 
-        <Detalhe atividade={atividadeSelecionada} salas={salas} />
+         <Detalhe atividade={atividadeSelecionada} salas={salas} onMensagem={setMensagem} onErro={setErro} />
       </section>
 
       <section className="cartao">
@@ -388,7 +394,7 @@ function salvarFilaPresencas(fila) {
   localStorage.setItem(FILA_PRESENCAS, JSON.stringify(fila));
 }
 
-function Detalhe({ atividade, salas }) {
+function Detalhe({ atividade, salas, onMensagem, onErro }) {
   if (!atividade) {
     return (
       <aside className="cartao">
@@ -398,7 +404,33 @@ function Detalhe({ atividade, salas }) {
     );
   }
 
+  return <DetalheAtividade atividade={atividade} salas={salas} onMensagem={onMensagem} onErro={onErro} />;
+}
+
+function DetalheAtividade({ atividade, salas, onMensagem, onErro }) {
   const sala = salas.find((item) => item.id === atividade.salaId);
+  const [inscricao, setInscricao] = useState(null);
+
+  useEffect(() => {
+    let ativo = true;
+    listarInscricoes(atividade.id).then((lista) => {
+      if (ativo) setInscricao(lista.find((item) => item.atividadeId === atividade.id && ['confirmada', 'em_espera', 'convocada'].includes(item.status)) || null);
+    }).catch(() => {
+      if (ativo) setInscricao(null);
+    });
+    return () => { ativo = false; };
+  }, [atividade.id]);
+
+  async function cancelarNoDetalhe() {
+    onErro('');
+    try {
+      await cancelarInscricao(inscricao.id);
+      setInscricao({ ...inscricao, status: 'cancelada' });
+      onMensagem('Inscricao cancelada.');
+    } catch (falha) {
+      onErro(falha.message);
+    }
+  }
 
   return (
     <aside className="cartao">
@@ -418,6 +450,80 @@ function Detalhe({ atividade, salas }) {
           </li>
         ))}
       </ol>
+      {inscricao ? <button type="button" onClick={cancelarNoDetalhe}>Cancelar inscricao</button> : <button type="button" onClick={async () => {
+        onErro('');
+        try {
+          await inscreverNaAtividade(atividade.id);
+          setInscricao({ atividadeId: atividade.id, status: 'confirmada' });
+          onMensagem('Inscricao realizada.');
+        } catch (falha) {
+          onErro(falha.message);
+        }
+      }}>Inscrever-se</button>}
     </aside>
+  );
+}
+
+function formatarContagem(registro) {
+  const restante = Math.max(0, Date.parse(registro) - Date.now());
+  const totalSegundos = Math.floor(restante / 1000);
+  const horas = String(Math.floor(totalSegundos / 3600)).padStart(2, '0');
+  const minutos = String(Math.floor((totalSegundos % 3600) / 60)).padStart(2, '0');
+  const segundos = String(totalSegundos % 60).padStart(2, '0');
+  return `${horas}:${minutos}:${segundos}`;
+}
+
+function TelaInscricoes({ atividades, onErro, onMensagem }) {
+  const [inscricoes, setInscricoes] = useState([]);
+  const [agora, setAgora] = useState(Date.now());
+
+  async function carregar() {
+    try {
+      setInscricoes(await listarInscricoes());
+    } catch (falha) {
+      onErro(falha.message);
+    }
+  }
+
+  useEffect(() => {
+    carregar();
+    const temporizador = window.setInterval(() => setAgora(Date.now()), 1000);
+    return () => window.clearInterval(temporizador);
+  }, []);
+
+  async function executar(acao, mensagem) {
+    onErro('');
+    try {
+      await acao();
+      onMensagem(mensagem);
+      await carregar();
+    } catch (falha) {
+      onErro(falha.message);
+    }
+  }
+
+  return (
+    <section className="cartao lista-inscricoes">
+      <p className="rotulo">Area do participante</p>
+      <h2>Minhas inscricoes</h2>
+      {!inscricoes.length ? <p className="estado-vazio">Voce ainda nao tem inscricoes.</p> : (
+        <ul>
+          {inscricoes.map((inscricao) => {
+            const atividade = atividades.find((item) => item.id === inscricao.atividadeId);
+            return <li key={inscricao.id}>
+              <strong>{atividade?.titulo || inscricao.atividadeId}</strong>
+              <span>Status: {inscricao.status}</span>
+              {inscricao.status === 'em_espera' && <span>Posicao na espera: {inscricao.posicaoNaEspera}</span>}
+              {inscricao.status === 'convocada' && <>
+                <span>Tempo para confirmar: <span key={agora}>{formatarContagem(inscricao.convocadaAte)}</span></span>
+                <button type="button" onClick={() => executar(() => confirmarInscricao(inscricao.id), 'Inscricao confirmada.')}>Confirmar convocacao</button>
+              </>}
+              {(inscricao.status === 'confirmada' || inscricao.status === 'em_espera' || inscricao.status === 'convocada') &&
+                <button type="button" onClick={() => executar(() => cancelarInscricao(inscricao.id), 'Inscricao cancelada.')}>Cancelar inscricao</button>}
+            </li>;
+          })}
+        </ul>
+      )}
+    </section>
   );
 }

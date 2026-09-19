@@ -264,6 +264,37 @@ button {
   margin-top: 4px;
 }
 
+.lista-inscricoes {
+  margin-top: 28px;
+  max-width: 920px;
+}
+
+.lista-inscricoes ul {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 20px 0 0;
+  padding: 0;
+}
+
+.lista-inscricoes li {
+  align-items: center;
+  border: 1px solid #e5e9ee;
+  border-radius: 10px;
+  display: grid;
+  gap: 8px 16px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 14px;
+}
+
+.lista-inscricoes li > span {
+  color: #536471;
+}
+
+.lista-inscricoes li > button {
+  grid-column: 3;
+}
+
 .formulario {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -306,8 +337,13 @@ dd {
 
   .painel,
   .filtros,
-  .formulario {
+  .formulario,
+  .lista-inscricoes li {
     grid-template-columns: 1fr;
+  }
+
+  .lista-inscricoes li > button {
+    grid-column: auto;
   }
 
   .cabecalho-linha,

@@ -40,6 +40,27 @@ const atividades = [
   },
 ];
 
+const inscricoes = [
+  {
+    id: 'ins_espera01',
+    atividadeId: 'atv_minicurso',
+    participanteId: 'p-carla',
+    status: 'em_espera',
+    posicaoNaEspera: 2,
+    convocadaAte: null,
+    criadaEm: '2026-10-19T18:00:00-03:00',
+  },
+  {
+    id: 'ins_convoc01',
+    atividadeId: 'atv_minicurso',
+    participanteId: 'p-carla',
+    status: 'convocada',
+    posicaoNaEspera: null,
+    convocadaAte: '2099-10-19T20:00:00-03:00',
+    criadaEm: '2026-10-19T17:00:00-03:00',
+  },
+];
+
 let simularFalhaDeRede = false;
 
 function respostaJson(corpo, status = 200) {
@@ -67,6 +88,14 @@ function instalarFetchFake() {
     }
     if (endereco.pathname === '/atividades/atv_minicurso') return respostaJson(atividades[1]);
     if (endereco.pathname === '/atividades/atv_palestra') return respostaJson(atividades[0]);
+    if (endereco.pathname === '/atividades/atv_palestra/inscricoes' && opcoes.method === 'POST') return respostaJson({ ...inscricoes[0], id: 'ins_nova01', atividadeId: 'atv_palestra', status: 'confirmada', posicaoNaEspera: null }, 201);
+    if (endereco.pathname === '/inscricoes' && !opcoes.method) return respostaJson(inscricoes);
+    if (endereco.pathname === '/inscricoes/ins_espera01/cancelamento') {
+      return respostaJson({ ...inscricoes[0], status: 'cancelada', posicaoNaEspera: null });
+    }
+    if (endereco.pathname === '/inscricoes/ins_convoc01/confirmacao') {
+      return respostaJson({ ...inscricoes[1], status: 'confirmada', convocadaAte: null });
+    }
     if (endereco.pathname === '/encontros/enc_1/codigo') {
       return respostaJson({
         encontroId: 'enc_1',
@@ -208,5 +237,51 @@ describe('M3 presenca por QR', () => {
     expect(await screen.findByRole('heading', { name: 'Presencas registradas' })).toBeInTheDocument();
     expect(screen.getByText('p-carla')).toBeInTheDocument();
     expect(screen.getByText('qr')).toBeInTheDocument();
+  });
+});
+
+describe('M2 inscricoes', () => {
+  it('permite inscrever no detalhe da atividade', async () => {
+    const usuario = userEvent.setup();
+    render(<App />);
+
+    await usuario.click(await screen.findByRole('button', { name: /Abertura/ }));
+    await usuario.click(screen.getByRole('button', { name: 'Inscrever-se' }));
+
+    expect(await screen.findByText('Inscricao realizada.')).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith('http://localhost:3000/atividades/atv_palestra/inscricoes', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('permite cancelar uma inscricao no detalhe da atividade', async () => {
+    const usuario = userEvent.setup();
+    render(<App />);
+
+    await usuario.click(await screen.findByRole('button', { name: /React pratico/ }));
+    await usuario.click(await screen.findByRole('button', { name: 'Cancelar inscricao' }));
+
+    expect(await screen.findByText('Inscricao cancelada.')).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith('http://localhost:3000/inscricoes/ins_espera01/cancelamento', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('lista status, espera, convocacao com contagem regressiva e confirma', async () => {
+    const usuario = userEvent.setup();
+    render(<App />);
+
+    await usuario.click(await screen.findByRole('button', { name: 'Minhas inscricoes' }));
+
+    expect(await screen.findByText(/Posicao na espera: 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Tempo para confirmar:/)).toBeInTheDocument();
+    await usuario.click(screen.getByRole('button', { name: 'Confirmar convocacao' }));
+    expect(await screen.findByText(/Inscricao confirmada/)).toBeInTheDocument();
+  });
+
+  it('cancela inscricao em minhas inscricoes', async () => {
+    const usuario = userEvent.setup();
+    render(<App />);
+
+    await usuario.click(await screen.findByRole('button', { name: 'Minhas inscricoes' }));
+    await usuario.click(screen.getAllByRole('button', { name: 'Cancelar inscricao' })[0]);
+
+    expect(await screen.findByText(/Inscricao cancelada/)).toBeInTheDocument();
   });
 });
