@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import express from 'express';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 const USUARIOS_INICIAIS = [
   ['org-ana', 'Ana Beatriz Lima', 'organizacao'],
@@ -60,14 +60,26 @@ function criarBanco() {
     CREATE TABLE inscricoes (
       id TEXT PRIMARY KEY,
       atividadeId TEXT NOT NULL,
+      participanteId TEXT,
       status TEXT NOT NULL
+    );
+
+    CREATE TABLE presencas (
+      id TEXT PRIMARY KEY,
+      encontroId TEXT NOT NULL,
+      participanteId TEXT NOT NULL,
+      origem TEXT NOT NULL,
+      lidoEm TEXT NOT NULL,
+      registradaEm TEXT NOT NULL,
+      justificativa TEXT,
+      UNIQUE (encontroId, participanteId)
     );
   `);
   return db;
 }
 
 function carregarDadosIniciais(db) {
-  db.exec('DELETE FROM inscricoes; DELETE FROM encontros; DELETE FROM atividades; DELETE FROM salas; DELETE FROM usuarios;');
+  db.exec('DELETE FROM presencas; DELETE FROM inscricoes; DELETE FROM encontros; DELETE FROM atividades; DELETE FROM salas; DELETE FROM usuarios;');
 
   const inserirUsuario = db.prepare('INSERT INTO usuarios (id, nome, papel) VALUES (?, ?, ?)');
   for (const usuario of USUARIOS_INICIAIS) inserirUsuario.run(...usuario);
@@ -78,6 +90,17 @@ function carregarDadosIniciais(db) {
 
 function gerarId(prefixo) {
   return `${prefixo}_${randomBytes(4).toString('hex')}`;
+}
+
+const ALFABETO_QR = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+function gerarCodigoQr(encontroId, minuto) {
+  const bytes = createHash('sha256').update(`${encontroId}:${minuto}`).digest();
+  let codigo = '';
+  for (let indice = 0; indice < 6; indice += 1) {
+    codigo += ALFABETO_QR[(bytes[indice] + encontroId.charCodeAt(indice % encontroId.length) + minuto) % ALFABETO_QR.length];
+  }
+  return codigo;
 }
 
 function cargaHorariaMinutos(encontros) {
@@ -205,6 +228,11 @@ function exigirOrganizacao(req, res, next) {
   next();
 }
 
+function exigirParticipante(req, res, next) {
+  if (req.usuario.papel !== 'participante') return erro(res, 403, 'SOMENTE_PARTICIPANTE');
+  next();
+}
+
 function corpoAtividadeValido(corpo) {
   return (
     corpo &&
@@ -278,9 +306,11 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
       const atividade = db.prepare('SELECT id FROM atividades WHERE id = ?').get(req.body.atividadeId);
       if (!atividade) return erro(res, 404, 'NAO_ENCONTRADO');
 
-      const inserir = db.prepare('INSERT INTO inscricoes (id, atividadeId, status) VALUES (?, ?, ?)');
+      const inserir = db.prepare(
+        'INSERT INTO inscricoes (id, atividadeId, participanteId, status) VALUES (?, ?, ?, ?)',
+      );
       for (const inscricao of req.body.inscricoes) {
-        inserir.run(gerarId('ins'), req.body.atividadeId, inscricao.status);
+        inserir.run(gerarId('ins'), req.body.atividadeId, inscricao.participanteId ?? null, inscricao.status);
       }
       res.status(204).end();
     });
@@ -303,6 +333,152 @@ export function criarServidor({ modoTeste = process.env.MODO_TESTE === '1' } = {
   app.get('/salas', (_req, res) => {
     const salas = db.prepare('SELECT id, nome, capacidade FROM salas ORDER BY rowid').all();
     res.json(salas);
+  });
+
+  app.get('/encontros/:id/codigo', exigirOrganizacao, (req, res) => {
+    const encontro = db
+      .prepare(
+        `SELECT e.id, e.inicio, a.cancelada
+         FROM encontros e
+         JOIN atividades a ON a.id = e.atividadeId
+         WHERE e.id = ?`,
+      )
+      .get(req.params.id);
+    if (!encontro) return erro(res, 404, 'NAO_ENCONTRADO');
+    if (encontro.cancelada) return erro(res, 422, 'ATIVIDADE_CANCELADA');
+
+    const agoraMs = Date.parse(agora());
+    const inicioMs = Date.parse(encontro.inicio);
+    if (agoraMs < inicioMs - 15 * 60000 || agoraMs > inicioMs + 30 * 60000) {
+      return erro(res, 422, 'FORA_DA_JANELA');
+    }
+
+    const inicioDoMinutoMs = Math.floor(agoraMs / 60000) * 60000;
+    const minuto = Math.floor(inicioDoMinutoMs / 60000);
+    const trocaEm = new Date(inicioDoMinutoMs + 60000).toISOString();
+    const validoAte = new Date(inicioDoMinutoMs + 120000).toISOString();
+    return res.json({
+      encontroId: encontro.id,
+      codigo: gerarCodigoQr(encontro.id, minuto),
+      trocaEm,
+      validoAte,
+    });
+  });
+
+  app.post('/encontros/:id/presencas', exigirParticipante, (req, res) => {
+    const encontro = db
+      .prepare('SELECT e.id, e.inicio, e.atividadeId FROM encontros e JOIN atividades a ON a.id = e.atividadeId WHERE e.id = ?')
+      .get(req.params.id);
+    if (!encontro) return erro(res, 404, 'NAO_ENCONTRADO');
+
+    const existente = db
+      .prepare('SELECT * FROM presencas WHERE encontroId = ? AND participanteId = ?')
+      .get(encontro.id, req.usuario.id);
+    if (existente) return res.status(200).json(existente);
+
+    const inscricao = db
+      .prepare(
+        `SELECT 1 FROM inscricoes
+         WHERE atividadeId = ? AND participanteId = ? AND status = 'confirmada'`,
+      )
+      .get(encontro.atividadeId, req.usuario.id);
+    if (!inscricao) return erro(res, 403, 'NAO_INSCRITO');
+
+    const agoraIso = agora();
+    const agoraMs = Date.parse(agoraIso);
+    const inicioMs = Date.parse(encontro.inicio);
+    if (agoraMs < inicioMs - 15 * 60000 || agoraMs > inicioMs + 30 * 60000) {
+      return erro(res, 422, 'FORA_DA_JANELA');
+    }
+
+    if (!req.body || typeof req.body.codigo !== 'string') return erro(res, 422, 'DADOS_INVALIDOS');
+    const codigo = req.body.codigo.replaceAll(' ', '').toUpperCase();
+    const minuto = Math.floor(agoraMs / 60000);
+    if (codigo !== gerarCodigoQr(encontro.id, minuto) && codigo !== gerarCodigoQr(encontro.id, minuto - 1)) {
+      return erro(res, 422, 'CODIGO_INVALIDO');
+    }
+
+    const presenca = {
+      id: gerarId('pre'),
+      encontroId: encontro.id,
+      participanteId: req.usuario.id,
+      origem: 'qr',
+      lidoEm: agoraIso,
+      registradaEm: agoraIso,
+      justificativa: null,
+    };
+    db.prepare(
+      `INSERT INTO presencas
+       (id, encontroId, participanteId, origem, lidoEm, registradaEm, justificativa)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      presenca.id,
+      presenca.encontroId,
+      presenca.participanteId,
+      presenca.origem,
+      presenca.lidoEm,
+      presenca.registradaEm,
+      presenca.justificativa,
+    );
+    return res.status(201).json(presenca);
+  });
+
+  app.post('/encontros/:id/presencas/manual', exigirOrganizacao, (req, res) => {
+    const encontro = db
+      .prepare('SELECT e.id, e.inicio, e.fim, e.atividadeId FROM encontros e WHERE e.id = ?')
+      .get(req.params.id);
+    if (!encontro) return erro(res, 404, 'NAO_ENCONTRADO');
+
+    const justificativa = req.body?.justificativa;
+    if (typeof justificativa !== 'string') {
+      return erro(res, 422, 'JUSTIFICATIVA_OBRIGATORIA');
+    }
+
+    const participanteId = req.body?.participanteId;
+    const existente = db
+      .prepare('SELECT * FROM presencas WHERE encontroId = ? AND participanteId = ?')
+      .get(encontro.id, participanteId);
+    if (existente) return res.status(200).json(existente);
+
+    const inscricao = db
+      .prepare(
+        `SELECT 1 FROM inscricoes
+         WHERE atividadeId = ? AND participanteId = ? AND status = 'confirmada'`,
+      )
+      .get(encontro.atividadeId, participanteId);
+    if (!inscricao) return erro(res, 403, 'NAO_INSCRITO');
+
+    const registradaEm = agora();
+    const registradaMs = Date.parse(registradaEm);
+    const inicioMs = Date.parse(encontro.inicio);
+    const fimMs = Date.parse(encontro.fim);
+    if (registradaMs < inicioMs - 15 * 60000 || registradaMs > fimMs + 2 * 60 * 60000) {
+      return erro(res, 422, 'FORA_DA_JANELA');
+    }
+
+    const presenca = {
+      id: gerarId('pre'),
+      encontroId: encontro.id,
+      participanteId,
+      origem: 'manual',
+      lidoEm: registradaEm,
+      registradaEm,
+      justificativa,
+    };
+    db.prepare(
+      `INSERT INTO presencas
+       (id, encontroId, participanteId, origem, lidoEm, registradaEm, justificativa)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      presenca.id,
+      presenca.encontroId,
+      presenca.participanteId,
+      presenca.origem,
+      presenca.lidoEm,
+      presenca.registradaEm,
+      presenca.justificativa,
+    );
+    return res.status(201).json(presenca);
   });
 
   app.post('/atividades', exigirOrganizacao, (req, res) => {

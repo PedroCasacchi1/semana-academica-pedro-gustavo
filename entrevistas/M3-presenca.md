@@ -1,6 +1,6 @@
 # Entrevista M3 - Presenca por QR
 
-Status: Rodada 1 encerrada e confirmada.
+Status: Rodada 2 encerrada e confirmada.
 
 ## Escopo da sessao
 
