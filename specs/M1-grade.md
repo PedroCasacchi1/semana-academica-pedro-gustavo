@@ -121,10 +121,6 @@ Os testes devem verificar a API pela costura HTTP exposta pelo servidor da aplic
 
 ## 8. Fatias de entrega
 
-1. Leitura basica e modelo de M1: `GET /salas`, `GET /atividades`, `GET /atividades/:id`, campos de `Atividade`, ordenacao de `encontros`, listagem de atividades, filtros definidos e `cargaHorariaMinutos` calculada. Regras: R4, R9, R10, R11, R12, R23, R24.
-2. Criacao de atividade com quantidade de encontros, validade temporal dos encontros e vagas por capacidade. Regras: R1, R2, R3, R5, R6.
-3. Conflito de sala na criacao, incluindo intervalo minimo e exclusao de atividades canceladas. Regras: R7, R8.
-4. Situacao calculada pelo relogio controlado e prevalencia de cancelamento. Regras: R13, R14.
-5. Alteracao de atividade com campos editaveis, campos nao editaveis e bloqueio de atividade cancelada. Regras: R15, R16, R17, R18.
-6. Contadores de ocupacao e reducao de vagas conforme inscricoes. Regras: R19, R25, R26, R27.
-7. Cancelamento de atividade antes do inicio, recusa apos inicio, recusa de novo cancelamento e cancelamento das inscricoes ativas. Regras: R20, R21, R22.
+1. Criacao e leitura. Regras: R1-R12, R23-R24.
+2. Situacao e edicao. Regras: R13-R19.
+3. Cancelamento e contadores. Regras: R20-R22, R25-R27.
